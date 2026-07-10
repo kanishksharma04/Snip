@@ -41,5 +41,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# plan
+# plan / agent instructions
 PLAN.md
+CLAUDE.md
+AGENTS.md
