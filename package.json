@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:check": "tsx --env-file=.env.local scripts/db-check.ts",
+    "test": "vitest run",
     "postinstall": "prisma generate"
   },
   "dependencies": {
@@ -17,6 +18,7 @@
     "@tabler/icons-react": "^3.45.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "nanoid": "^5.1.16",
     "next": "16.2.12",
     "next-auth": "^5.0.0-beta.32",
     "next-themes": "^0.4.6",
@@ -44,6 +46,7 @@
     "prisma": "^7.9.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }
