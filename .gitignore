@@ -49,4 +49,8 @@ CLAUDE.md
 AGENTS.md
 .agents/
 .claude/
+.windsurf/
 skills-lock.json
+
+# prisma generated client
+/src/generated/prisma
