@@ -31,7 +31,13 @@ const FormFieldContext = React.createContext<FormFieldContextValue>(
 function FormField<
   TFieldValues extends FieldValues = FieldValues,
   TName extends FieldPath<TFieldValues> = FieldPath<TFieldValues>,
->({ ...props }: ControllerProps<TFieldValues, TName>) {
+  // A schema with .transform()/.pipe() (e.g. Step 11's empty-string handling)
+  // makes useForm's output type differ from its input type. Without this
+  // third generic, form.control's real type (Control<Input, _, Output>)
+  // can't be assigned here, since it silently defaulted to Control<Input,
+  // _, Input>.
+  TTransformedValues = TFieldValues,
+>({ ...props }: ControllerProps<TFieldValues, TName, TTransformedValues>) {
   return (
     <FormFieldContext.Provider value={{ name: props.name }}>
       <Controller {...props} />

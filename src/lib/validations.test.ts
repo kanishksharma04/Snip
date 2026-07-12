@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { customSlugSchema, destinationSchema } from "@/lib/validations";
+import {
+  customSlugSchema,
+  destinationSchema,
+  formSchema,
+  parseIstDatetimeLocal,
+} from "@/lib/validations";
 
 describe("destinationSchema", () => {
   it("accepts a normal https URL", () => {
@@ -134,5 +139,50 @@ describe("customSlugSchema", () => {
   it("rejects reserved words via Step 8's isReserved, not a duplicated list", () => {
     expect(customSlugSchema.safeParse("dashboard").success).toBe(false);
     expect(customSlugSchema.safeParse("Dashboard").success).toBe(false);
+  });
+});
+
+describe("parseIstDatetimeLocal", () => {
+  it("treats a naive datetime-local string as IST wall-clock time", () => {
+    // 2026-08-01T09:00 IST is 2026-08-01T03:30 UTC.
+    const result = parseIstDatetimeLocal("2026-08-01T09:00");
+    expect(result.toISOString()).toBe("2026-08-01T03:30:00.000Z");
+  });
+});
+
+describe("formSchema — the empty-string trap", () => {
+  it("treats an untouched (empty string) custom slug as valid/absent", () => {
+    const result = formSchema.safeParse({
+      destination: "https://example.com",
+      customSlug: "",
+      expiresAt: "",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.customSlug).toBeUndefined();
+      expect(result.data.expiresAt).toBeUndefined();
+    }
+  });
+
+  it("still rejects an actually-invalid, non-empty custom slug", () => {
+    const result = formSchema.safeParse({
+      destination: "https://example.com",
+      customSlug: "ab",
+      expiresAt: "",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("parses a real IST expiry date into a Date", () => {
+    const result = formSchema.safeParse({
+      destination: "https://example.com",
+      customSlug: "",
+      expiresAt: "2026-08-01T09:00",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.expiresAt).toBeInstanceOf(Date);
+      expect(result.data.expiresAt?.toISOString()).toBe("2026-08-01T03:30:00.000Z");
+    }
   });
 });

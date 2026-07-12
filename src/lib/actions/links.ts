@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { generateSlug } from "@/lib/slug";
-import { customSlugSchema, destinationSchema } from "@/lib/validations";
+import { customSlugSchema, destinationSchema, getSnipBaseUrl } from "@/lib/validations";
 import { Prisma, type Link } from "@/generated/prisma/client";
 import type { ActionResult } from "@/types/action";
 
@@ -15,6 +15,17 @@ export type CreateLinkInput = {
   customSlug?: string;
   expiresAt?: Date;
 };
+
+// The short URL is built here, server-side, from SNIP_BASE_URL — that env
+// var is server-only (not NEXT_PUBLIC_-prefixed) so a Client Component
+// reading it directly would get `undefined` at runtime, not a build error.
+// The client never constructs this URL itself; it only renders what the
+// action gives it.
+export type CreateLinkResult = Link & { shortUrl: string };
+
+function toResult(link: Link): CreateLinkResult {
+  return { ...link, shortUrl: `${getSnipBaseUrl()}/${link.slug}` };
+}
 
 // Prisma 7 + the pg driver adapter does NOT put the violated column names in
 // a top-level `meta.target` the way classic Prisma did — verified directly
@@ -56,7 +67,7 @@ function isSlugCollision(error: unknown): boolean {
 
 export async function createLink(
   input: CreateLinkInput,
-): Promise<ActionResult<Link>> {
+): Promise<ActionResult<CreateLinkResult>> {
   const session = await getSession();
   const userId = session?.user?.id;
   if (!userId) {
@@ -99,10 +110,13 @@ export async function createLink(
         data: { userId, slug, destination, expiresAt: input.expiresAt },
       });
       revalidatePath("/dashboard");
-      return { success: true, data: link };
+      return { success: true, data: toResult(link) };
     } catch (error) {
       if (isSlugCollision(error)) {
-        return { success: false, error: "That slug is already taken." };
+        // Field-specific: this is the user's own input being wrong, not a
+        // system failure — it belongs under the customSlug input, not a
+        // generic toast.
+        return { success: false, error: "That slug is already taken.", field: "customSlug" };
       }
       return { success: false, error: "Something went wrong creating your link." };
     }
@@ -119,7 +133,7 @@ export async function createLink(
         data: { userId, slug, destination, expiresAt: input.expiresAt },
       });
       revalidatePath("/dashboard");
-      return { success: true, data: link };
+      return { success: true, data: toResult(link) };
     } catch (error) {
       if (isSlugCollision(error)) {
         continue;

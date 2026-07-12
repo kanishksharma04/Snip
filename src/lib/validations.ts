@@ -1,12 +1,28 @@
 import { z } from "zod";
 import { isReserved } from "@/lib/slug";
 
-function getSnipBaseUrl(): string {
+export function getSnipBaseUrl(): string {
   const value = process.env.SNIP_BASE_URL;
   if (!value) {
     throw new Error("SNIP_BASE_URL is not set");
   }
   return value;
+}
+
+// SNIP_BASE_URL is server-only (not NEXT_PUBLIC_-prefixed) — it's never
+// inlined into the client bundle. destinationSchema is shared into a Client
+// Component's zodResolver (Step 11's formSchema), so its own-domain check
+// below must tolerate running somewhere this env var doesn't exist, without
+// throwing an unhandled rejection out of form validation. This does not
+// weaken enforcement: createLink() always re-validates with the same
+// destinationSchema server-side, where SNIP_BASE_URL is guaranteed to
+// exist — that's the real boundary, this is best-effort UX only.
+function getSnipBaseUrlSafe(): string | null {
+  try {
+    return getSnipBaseUrl();
+  } catch {
+    return null;
+  }
 }
 
 function ipv4ToInt(ip: string): number | null {
@@ -113,9 +129,13 @@ export const destinationSchema = z
 
     // Attack: redirect loop — a link whose destination is Snip itself.
     // Matched on hostname (not substring) so "snip-blush.vercel.app.evil.com"
-    // doesn't slip through a naive .includes() check.
-    const baseHostname = new URL(getSnipBaseUrl()).hostname.toLowerCase();
-    if (url.hostname.toLowerCase() === baseHostname) {
+    // doesn't slip through a naive .includes() check. Uses the safe getter:
+    // in a browser bundle SNIP_BASE_URL is unavailable and this check is
+    // simply skipped there (see getSnipBaseUrlSafe's comment) — the server
+    // always re-runs this exact check where the value is guaranteed.
+    const baseUrl = getSnipBaseUrlSafe();
+    const baseHostname = baseUrl ? new URL(baseUrl).hostname.toLowerCase() : null;
+    if (baseHostname && url.hostname.toLowerCase() === baseHostname) {
       ctx.addIssue({
         code: "custom",
         message: "Destination cannot point back to Snip",
@@ -161,3 +181,52 @@ export const customSlugSchema = z
   // (e.g. /dashboard, /login) — imported from Step 8 rather than
   // duplicating the list, so the two can't drift apart.
   .refine((slug) => !isReserved(slug), "This slug is reserved");
+
+// An untouched optional <input> in a React Hook Form submits "", not
+// undefined. "" would fail customSlugSchema's {3,32} length check even
+// though the user never touched the field — so both optional form fields
+// convert "" to undefined before the real schema ever sees it.
+//
+// Deliberately `.transform().pipe()`, not `z.preprocess()`: preprocess types
+// its input as `unknown` (it accepts anything before transforming), which
+// would make z.input<typeof formSchema> collapse these fields to `unknown`
+// and break binding them to plain <input> elements. transform().pipe()
+// keeps the input type as the wrapped schema's own input (string).
+const emptyStringToUndefined = (value: string) => (value === "" ? undefined : value);
+
+// Snip currently assumes its users are in IST (+05:30) rather than doing
+// per-user timezone detection. <input type="datetime-local"> yields a naive
+// "YYYY-MM-DDTHH:mm" string with no timezone attached. Relying on
+// `new Date(value)`'s implicit "local timezone of whatever runs this code"
+// would be correct in an IST browser but wrong on a server whose runtime
+// timezone isn't IST (Vercel's Node functions run in UTC), and it would make
+// this function's behavior depend on the test runner's system timezone
+// rather than being deterministic. This instead treats the string as IST
+// wall-clock time explicitly, everywhere it runs.
+const IST_OFFSET_MINUTES = 5 * 60 + 30;
+
+export function parseIstDatetimeLocal(value: string): Date {
+  const [datePart, timePart] = value.split("T");
+  const [year, month, day] = (datePart ?? "").split("-").map(Number);
+  const [hour, minute] = (timePart ?? "00:00").split(":").map(Number);
+  const utcMillis =
+    Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1, hour ?? 0, minute ?? 0) -
+    IST_OFFSET_MINUTES * 60_000;
+  return new Date(utcMillis);
+}
+
+export const formSchema = z.object({
+  destination: destinationSchema,
+  customSlug: z
+    .string()
+    .transform(emptyStringToUndefined)
+    .pipe(customSlugSchema.optional()),
+  expiresAt: z
+    .string()
+    .transform(emptyStringToUndefined)
+    .pipe(z.string().optional())
+    .transform((value) => (value ? parseIstDatetimeLocal(value) : undefined)),
+});
+
+export type FormInput = z.input<typeof formSchema>;
+export type FormOutput = z.output<typeof formSchema>;
