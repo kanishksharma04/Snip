@@ -4,6 +4,27 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 - **Database:** Neon Postgres, region `iad1` (AWS `us-east-1`) — matches Vercel's default Node function region, since the redirect resolve endpoint runs on Vercel, not on the developer's machine. Provisioned via the Vercel Marketplace Neon integration.
 
+## Performance log
+
+### Step 14 — naive redirect (Postgres on every request)
+
+Measured against production (`https://snip-blush.vercel.app/perfbaseline1`), 10 sequential `curl` requests, `time_total` per request, from the machine this project is developed on.
+
+| # | ms |
+|---|---|
+| 1 | 1664.3 |
+| 2 | 678.9 |
+| 3 | 505.9 |
+| 4 | 749.5 |
+| 5 | 410.5 |
+| 6 | 400.5 |
+| 7 | 470.9 |
+| 8 | 466.7 |
+| 9 | 485.9 |
+| 10 | 473.2 |
+
+**Median: 479.6 ms** · **p95: 1664.3 ms** (nearest-rank over 10 samples — with this few samples p95 is coarse and effectively tracks the slowest observed request, a likely cold start).
+
 ## Getting Started
 
 First, run the development server:
