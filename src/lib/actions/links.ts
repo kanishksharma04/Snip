@@ -5,8 +5,11 @@ import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { generateSlug } from "@/lib/slug";
 import { customSlugSchema, destinationSchema, getSnipBaseUrl } from "@/lib/validations";
+import { redis, LINK_CACHE_PREFIX } from "@/lib/redis";
 import { Prisma, type Link } from "@/generated/prisma/client";
 import type { ActionResult } from "@/types/action";
+
+const NOT_FOUND_ERROR = "Link not found.";
 
 const MAX_AUTO_SLUG_RETRIES = 3;
 
@@ -146,4 +149,132 @@ export async function createLink(
     success: false,
     error: "Could not generate a unique slug. Please try again.",
   };
+}
+
+export type UpdateLinkInput = {
+  destination?: string;
+  expiresAt?: Date | null;
+};
+
+export async function updateLink(
+  linkId: string,
+  input: UpdateLinkInput,
+): Promise<ActionResult<CreateLinkResult>> {
+  const session = await getSession();
+  const userId = session?.user?.id;
+  if (!userId) {
+    return { success: false, error: "You must be signed in." };
+  }
+
+  const existing = await db.link.findUnique({
+    where: { id: linkId },
+    select: { userId: true, slug: true },
+  });
+  // Same response for "doesn't exist" and "exists but isn't yours" — a
+  // distinct message for the latter would let a user probe which link IDs
+  // are real.
+  if (!existing || existing.userId !== userId) {
+    return { success: false, error: NOT_FOUND_ERROR };
+  }
+
+  let destination: string | undefined;
+  if (input.destination !== undefined) {
+    const result = destinationSchema.safeParse(input.destination);
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error.issues[0]?.message ?? "Invalid destination URL.",
+        field: "destination",
+      };
+    }
+    destination = result.data;
+  }
+
+  if (input.expiresAt && input.expiresAt.getTime() <= Date.now()) {
+    return { success: false, error: "Expiry date must be in the future.", field: "expiresAt" };
+  }
+
+  // Scoped by userId as well as id — belt-and-braces alongside the read
+  // above, so the actual mutation can never apply to a row this session
+  // doesn't own even if that changed between the two statements.
+  const { count } = await db.link.updateMany({
+    where: { id: linkId, userId },
+    data: {
+      ...(destination !== undefined ? { destination } : {}),
+      ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
+    },
+  });
+  if (count === 0) {
+    return { success: false, error: NOT_FOUND_ERROR };
+  }
+
+  const updated = await db.link.findUniqueOrThrow({ where: { id: linkId } });
+
+  // Cache invalidation: one exact known key, deleted before returning —
+  // never a pattern, never SCAN/KEYS. A stale cache entry on an updated
+  // link is a correctness bug (visitors keep going to the old destination
+  // until the 24h TTL expires), not a performance detail.
+  await redis.del(`${LINK_CACHE_PREFIX}${existing.slug}`);
+  revalidatePath("/dashboard");
+  return { success: true, data: toResult(updated) };
+}
+
+export async function deleteLink(linkId: string): Promise<ActionResult<{ id: string }>> {
+  const session = await getSession();
+  const userId = session?.user?.id;
+  if (!userId) {
+    return { success: false, error: "You must be signed in." };
+  }
+
+  const existing = await db.link.findUnique({
+    where: { id: linkId },
+    select: { userId: true, slug: true },
+  });
+  if (!existing || existing.userId !== userId) {
+    return { success: false, error: NOT_FOUND_ERROR };
+  }
+
+  const { count } = await db.link.deleteMany({ where: { id: linkId, userId } });
+  if (count === 0) {
+    return { success: false, error: NOT_FOUND_ERROR };
+  }
+
+  await redis.del(`${LINK_CACHE_PREFIX}${existing.slug}`);
+  revalidatePath("/dashboard");
+  return { success: true, data: { id: linkId } };
+}
+
+export async function toggleLinkActive(
+  linkId: string,
+): Promise<ActionResult<CreateLinkResult>> {
+  const session = await getSession();
+  const userId = session?.user?.id;
+  if (!userId) {
+    return { success: false, error: "You must be signed in." };
+  }
+
+  const existing = await db.link.findUnique({
+    where: { id: linkId },
+    select: { userId: true, slug: true, isActive: true },
+  });
+  if (!existing || existing.userId !== userId) {
+    return { success: false, error: NOT_FOUND_ERROR };
+  }
+
+  const { count } = await db.link.updateMany({
+    where: { id: linkId, userId },
+    data: { isActive: !existing.isActive },
+  });
+  if (count === 0) {
+    return { success: false, error: NOT_FOUND_ERROR };
+  }
+
+  const updated = await db.link.findUniqueOrThrow({ where: { id: linkId } });
+
+  // Disabling a link must take effect on the very next request — a stale
+  // "active" cache entry would keep redirecting after the owner turned it
+  // off, which is the same class of bug as the update case above.
+  await redis.del(`${LINK_CACHE_PREFIX}${existing.slug}`);
+  revalidatePath("/dashboard");
+  return { success: true, data: toResult(updated) };
 }
