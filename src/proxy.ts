@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { redis, LINK_CACHE_PREFIX } from "@/lib/redis";
 
 // HARD CONSTRAINT: this file must never import Prisma or anything that
 // transitively imports it (e.g. @/lib/db, @/lib/actions/*). On this Next.js
@@ -10,61 +11,63 @@ import type { NextRequest } from "next/server";
 // Prisma import here would in fact work today. We keep this split anyway:
 // the redirect path fetches a separate Node-runtime route handler instead of
 // querying Postgres inline, on purpose, to preserve the architecture Phase 3
-// is built to teach (cache-first redirects, Step 17) rather than because the
-// runtime forces it. Naive today, deliberately — Step 14 measures this
-// version, Step 17 replaces the Postgres call with Redis.
+// is built to teach (cache-first redirects) rather than because the runtime
+// forces it. @/lib/redis has no Prisma dependency, so reading the cache
+// directly here is safe under this same constraint.
 type ResolveResult =
   | { found: true; destination: string; isActive: boolean; expiresAt: string | null }
   | { found: false };
 
-export async function proxy(request: NextRequest) {
-  const slug = request.nextUrl.pathname.slice(1);
-
-  // A relative fetch has no base URL in this runtime — build an absolute
-  // one from the incoming request's own origin.
-  const resolveUrl = new URL("/api/internal/resolve", request.nextUrl.origin);
-
-  const response = await fetch(resolveUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    // Case-sensitive: slug is passed through exactly as received, never
-    // lowercased (that's isReserved's concern, not this one).
-    body: JSON.stringify({ slug }),
-  });
-
-  if (response.status === 404) {
-    // Let Next.js render its own not-found page rather than rewriting to a
-    // custom route — there's no extra content to show beyond "not found",
-    // and NextResponse.next() means one less route to maintain for a result
-    // that's already exactly what Next's built-in 404 provides.
-    return NextResponse.next();
-  }
-
-  const result: ResolveResult = await response.json();
-
+function buildResponse(result: ResolveResult, origin: string): NextResponse {
   if (!result.found) {
+    // Let Next.js render its own not-found page rather than rewriting to a
+    // custom route — there's no extra content to show beyond "not found".
     return NextResponse.next();
   }
 
   const isExpired = result.expiresAt !== null && new Date(result.expiresAt) <= new Date();
 
   if (!result.isActive || isExpired) {
-    return NextResponse.redirect(new URL("/expired", request.nextUrl.origin), {
-      status: 302,
-    });
+    return NextResponse.redirect(new URL("/expired", origin), { status: 302 });
   }
 
   // 302, explicit: NextResponse.redirect() defaults to 307, which preserves
   // the request method — wrong semantics for a short link, and a silent
   // default that produces no error if forgotten.
-  const redirectResponse = NextResponse.redirect(result.destination, {
-    status: 302,
-  });
+  const redirectResponse = NextResponse.redirect(result.destination, { status: 302 });
   // Without this, a CDN or browser can cache the redirect and future visits
   // never reach us again — the same failure mode as a 301, through a
   // different door.
   redirectResponse.headers.set("Cache-Control", "no-store");
   return redirectResponse;
+}
+
+export async function proxy(request: NextRequest) {
+  // Case-sensitive throughout: the Step 8 alphabet includes both cases, so
+  // "JzjykHi" and "jzjykhi" are different links. Never lowercased here.
+  const slug = request.nextUrl.pathname.slice(1);
+  const cacheKey = `${LINK_CACHE_PREFIX}${slug}`;
+
+  // Cache-first: a warm slug completes the redirect with zero database
+  // queries — this is the entire point of Phase 3.
+  const cached = await redis.get<ResolveResult>(cacheKey);
+  if (cached) {
+    return buildResponse(cached, request.nextUrl.origin);
+  }
+
+  // Cache miss: fall back to the resolve endpoint, which queries Postgres
+  // and populates the cache (both positive and negative) for next time.
+  // A relative fetch has no base URL in this runtime — build an absolute
+  // one from the incoming request's own origin.
+  const resolveUrl = new URL("/api/internal/resolve", request.nextUrl.origin);
+  const response = await fetch(resolveUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slug }),
+  });
+
+  const result: ResolveResult = await response.json();
+  return buildResponse(result, request.nextUrl.origin);
 }
 
 export const config = {
