@@ -26,6 +26,27 @@ Measured against production (`https://snip-blush.vercel.app/perfbaseline1`), 10 
 
 **Median: 479.6 ms** · **p95: 1664.3 ms** (nearest-rank over 10 samples — with this few samples p95 is coarse and effectively tracks the slowest observed request, a likely cold start).
 
+### Step 19 — cache-first redirect (Redis, Postgres only on a miss)
+
+Same method, same machine, one warm-up request first (excluded) to populate the cache, then 10 measured requests against `https://snip-blush.vercel.app/perfcached01`.
+
+| # | ms |
+|---|---|
+| 1 | 727.0 |
+| 2 | 686.4 |
+| 3 | 379.1 |
+| 4 | 655.1 |
+| 5 | 366.7 |
+| 6 | 434.2 |
+| 7 | 445.4 |
+| 8 | 366.2 |
+| 9 | 373.5 |
+| 10 | 356.3 |
+
+**Median: 406.6 ms** · **p95: 727.0 ms**.
+
+**Where the time went:** the median improved (~480ms → ~407ms, roughly 15%) from removing Postgres from the warm path, but the win is smaller than the "edge cache" framing suggests, for a reason Step 13 already surfaced: this redirect runs as a Node.js Lambda, not an edge function, on this Next.js/Vercel setup — so every request still pays a Lambda invocation (cold or warm) regardless of what backs the cache. Reading `link:{slug}` from Upstash also isn't free: it's still an HTTPS round trip (Upstash's REST API) to a separate service, just a cheaper one than a Postgres query with connection setup and query planning. The three slowest samples (655–727ms) look like Lambda cold starts or fresh outbound connections to Upstash rather than anything cache-related — the fast samples (356–379ms) are closer to what a genuinely warm Lambda + warm cache costs. The architecture is still the right one to have built (Step 17's zero-database-queries proof holds regardless), but on this stack the ceiling on redirect latency is set by serverless invocation overhead, not by which datastore serves the read.
+
 ## Getting Started
 
 First, run the development server:
