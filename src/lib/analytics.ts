@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { UAParser } from "ua-parser-js";
 
 export type ParsedUserAgent = {
@@ -53,4 +54,19 @@ export function normalizeReferrer(referrer: string | null): string {
   } catch {
     return "direct";
   }
+}
+
+// The raw IP is never stored; a daily-rotating salt lets us count unique
+// visitors within a day without retaining anything that identifies a person
+// across days.
+export function hashIp(ip: string, now: Date = new Date()): string {
+  const salt = process.env.IP_HASH_SALT;
+  if (!salt) {
+    throw new Error("IP_HASH_SALT is not set");
+  }
+  const todaysDateUTC = now.toISOString().slice(0, 10); // YYYY-MM-DD, UTC
+  return createHash("sha256")
+    .update(`${ip}${salt}${todaysDateUTC}`)
+    .digest("hex")
+    .slice(0, 16);
 }

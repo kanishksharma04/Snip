@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getGeo, normalizeReferrer, parseUserAgent } from "@/lib/analytics";
+import { getGeo, hashIp, normalizeReferrer, parseUserAgent } from "@/lib/analytics";
 
 const DESKTOP_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -67,5 +67,26 @@ describe("normalizeReferrer", () => {
 
   it("returns 'direct' for an unparseable value", () => {
     expect(normalizeReferrer("not a url")).toBe("direct");
+  });
+});
+
+describe("hashIp", () => {
+  const ip = "203.0.113.42";
+
+  it("produces the same hash for the same IP within the same day", () => {
+    const noon = new Date("2026-07-16T12:00:00Z");
+    const evening = new Date("2026-07-16T23:59:59Z");
+    expect(hashIp(ip, noon)).toBe(hashIp(ip, evening));
+  });
+
+  it("produces a different hash for the same IP on a different day", () => {
+    const today = new Date("2026-07-16T12:00:00Z");
+    const tomorrow = new Date("2026-07-17T12:00:00Z");
+    expect(hashIp(ip, today)).not.toBe(hashIp(ip, tomorrow));
+  });
+
+  it("returns a 16-character hex string", () => {
+    const hash = hashIp(ip, new Date("2026-07-16T12:00:00Z"));
+    expect(hash).toMatch(/^[0-9a-f]{16}$/);
   });
 });
