@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import type { NextFetchEvent, NextRequest } from "next/server";
 import { redis, LINK_CACHE_PREFIX } from "@/lib/redis";
+import { getGeo, hashIp, normalizeReferrer, parseUserAgent } from "@/lib/analytics";
 
 // HARD CONSTRAINT: this file must never import Prisma or anything that
 // transitively imports it (e.g. @/lib/db, @/lib/actions/*). On this Next.js
@@ -12,11 +13,15 @@ import { redis, LINK_CACHE_PREFIX } from "@/lib/redis";
 // the redirect path fetches a separate Node-runtime route handler instead of
 // querying Postgres inline, on purpose, to preserve the architecture Phase 3
 // is built to teach (cache-first redirects) rather than because the runtime
-// forces it. @/lib/redis has no Prisma dependency, so reading the cache
-// directly here is safe under this same constraint.
+// forces it. @/lib/redis and @/lib/analytics have no Prisma dependency, so
+// using them directly here is safe under this same constraint.
 type ResolveResult =
   | { found: true; destination: string; isActive: boolean; expiresAt: string | null }
   | { found: false };
+
+function isLinkExpired(result: Extract<ResolveResult, { found: true }>): boolean {
+  return result.expiresAt !== null && new Date(result.expiresAt) <= new Date();
+}
 
 function buildResponse(result: ResolveResult, origin: string): NextResponse {
   if (!result.found) {
@@ -25,9 +30,7 @@ function buildResponse(result: ResolveResult, origin: string): NextResponse {
     return NextResponse.next();
   }
 
-  const isExpired = result.expiresAt !== null && new Date(result.expiresAt) <= new Date();
-
-  if (!result.isActive || isExpired) {
+  if (!result.isActive || isLinkExpired(result)) {
     return NextResponse.redirect(new URL("/expired", origin), { status: 302 });
   }
 
@@ -42,7 +45,7 @@ function buildResponse(result: ResolveResult, origin: string): NextResponse {
   return redirectResponse;
 }
 
-export async function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest, event: NextFetchEvent) {
   // Case-sensitive throughout: the Step 8 alphabet includes both cases, so
   // "JzjykHi" and "jzjykhi" are different links. Never lowercased here.
   const slug = request.nextUrl.pathname.slice(1);
@@ -51,23 +54,51 @@ export async function proxy(request: NextRequest) {
   // Cache-first: a warm slug completes the redirect with zero database
   // queries — this is the entire point of Phase 3.
   const cached = await redis.get<ResolveResult>(cacheKey);
+  let result: ResolveResult;
   if (cached) {
-    return buildResponse(cached, request.nextUrl.origin);
+    result = cached;
+  } else {
+    // Cache miss: fall back to the resolve endpoint, which queries Postgres
+    // and populates the cache (both positive and negative) for next time.
+    // A relative fetch has no base URL in this runtime — build an absolute
+    // one from the incoming request's own origin.
+    const resolveUrl = new URL("/api/internal/resolve", request.nextUrl.origin);
+    const response = await fetch(resolveUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug }),
+    });
+    result = await response.json();
   }
 
-  // Cache miss: fall back to the resolve endpoint, which queries Postgres
-  // and populates the cache (both positive and negative) for next time.
-  // A relative fetch has no base URL in this runtime — build an absolute
-  // one from the incoming request's own origin.
-  const resolveUrl = new URL("/api/internal/resolve", request.nextUrl.origin);
-  const response = await fetch(resolveUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ slug }),
-  });
+  // The redirect response is built first — tracking is dispatched after,
+  // via waitUntil, so a slow or failing write can never delay or break the
+  // visitor's redirect. Not in this step: no Redis for tracking itself, no
+  // separate queue — just a fire-and-forget POST.
+  const redirectResponse = buildResponse(result, request.nextUrl.origin);
 
-  const result: ResolveResult = await response.json();
-  return buildResponse(result, request.nextUrl.origin);
+  if (result.found && result.isActive && !isLinkExpired(result)) {
+    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+    const { device, os, browser } = parseUserAgent(request.headers.get("user-agent") ?? "");
+    const trackUrl = new URL("/api/internal/track", request.nextUrl.origin);
+    event.waitUntil(
+      fetch(trackUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug,
+          ipHash: hashIp(ip),
+          ...getGeo(request.headers),
+          device,
+          os,
+          browser,
+          referrer: normalizeReferrer(request.headers.get("referer")),
+        }),
+      }),
+    );
+  }
+
+  return redirectResponse;
 }
 
 export const config = {
