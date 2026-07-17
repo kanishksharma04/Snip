@@ -17,6 +17,17 @@ export function formatDateIst(date: Date): string {
   }).format(date);
 }
 
+export function formatDateTimeIst(date: Date): string {
+  return new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+    timeZone: DISPLAY_TIMEZONE,
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 export function isPast(date: Date): boolean {
   return date.getTime() <= Date.now();
 }
