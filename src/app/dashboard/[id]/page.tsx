@@ -2,11 +2,19 @@ import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { getSnipBaseUrl } from "@/lib/validations";
-import { getClicksOverTime } from "@/lib/stats";
+import {
+  getClicksOverTime,
+  getCountryBreakdown,
+  getDeviceBreakdown,
+  getTopReferrers,
+} from "@/lib/stats";
 import { ActivityFeed } from "@/components/features/activity-feed";
 import { ActiveToggle } from "@/components/features/active-toggle";
 import { CopyButton } from "@/components/features/copy-button";
 import { ClicksChart } from "@/components/features/clicks-chart";
+import { ReferrerTable } from "@/components/features/referrer-table";
+import { DevicePieChart } from "@/components/features/device-pie-chart";
+import { CountryList } from "@/components/features/country-list";
 
 // Default range until Step 29 adds the actual selector UI.
 const DEFAULT_RANGE_DAYS = 30;
@@ -44,6 +52,11 @@ export default async function LinkDetailPage({
 
   const shortUrl = `${getSnipBaseUrl()}/${link.slug}`;
   const clicksOverTime = await getClicksOverTime(link.id, DEFAULT_RANGE_DAYS);
+  const [referrers, devices, countries] = await Promise.all([
+    getTopReferrers(link.id, DEFAULT_RANGE_DAYS),
+    getDeviceBreakdown(link.id, DEFAULT_RANGE_DAYS),
+    getCountryBreakdown(link.id, DEFAULT_RANGE_DAYS),
+  ]);
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -68,6 +81,21 @@ export default async function LinkDetailPage({
       <div>
         <h2 className="mb-3 text-lg font-semibold">Clicks over time</h2>
         <ClicksChart data={clicksOverTime} days={DEFAULT_RANGE_DAYS} />
+      </div>
+
+      <div className="grid gap-6 md:grid-cols-3">
+        <div>
+          <h2 className="mb-3 text-lg font-semibold">Top referrers</h2>
+          <ReferrerTable data={referrers} />
+        </div>
+        <div>
+          <h2 className="mb-3 text-lg font-semibold">Devices</h2>
+          <DevicePieChart data={devices} />
+        </div>
+        <div>
+          <h2 className="mb-3 text-lg font-semibold">Countries</h2>
+          <CountryList data={countries} />
+        </div>
       </div>
 
       <div>
