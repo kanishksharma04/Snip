@@ -1,13 +1,11 @@
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
+import { getSnipBaseUrl } from "@/lib/validations";
 import { ActivityFeed } from "@/components/features/activity-feed";
+import { ActiveToggle } from "@/components/features/active-toggle";
+import { CopyButton } from "@/components/features/copy-button";
 
-// Minimal shell for now — just enough to host the activity feed. Step 25
-// builds this out into the full detail page (header, destination, total
-// clicks, copy button, active toggle). The ownership scoping below isn't a
-// preview of Step 25's job; it's the only correct way to query "this link's
-// clicks" at all, so it has to exist here regardless of step boundaries.
 export default async function LinkDetailPage({
   params,
 }: {
@@ -21,9 +19,12 @@ export default async function LinkDetailPage({
 
   const { id } = await params;
 
+  // Ownership check: a link that exists but belongs to someone else 404s
+  // exactly like one that doesn't exist at all — never a distinct "not
+  // yours" response that would let a user probe which link IDs are real.
   const link = await db.link.findFirst({
     where: { id, userId },
-    select: { id: true },
+    select: { id: true, slug: true, destination: true, clickCount: true, isActive: true },
   });
   if (!link) {
     notFound();
@@ -36,10 +37,32 @@ export default async function LinkDetailPage({
     select: { id: true, createdAt: true, country: true, device: true, referrer: true },
   });
 
+  const shortUrl = `${getSnipBaseUrl()}/${link.slug}`;
+
   return (
-    <div className="p-6">
-      <h1 className="mb-6 text-xl font-semibold">Recent activity</h1>
-      <ActivityFeed events={events} />
+    <div className="flex flex-col gap-6 p-6">
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-semibold">{link.slug}</h1>
+          <ActiveToggle linkId={link.id} isActive={link.isActive} />
+        </div>
+        <p className="text-muted-foreground max-w-xl truncate" title={link.destination}>
+          {link.destination}
+        </p>
+        <div className="flex items-center gap-3">
+          <span className="text-sm">{shortUrl}</span>
+          <CopyButton text={shortUrl} />
+        </div>
+        <p className="text-sm">
+          <span className="font-medium">{link.clickCount}</span>{" "}
+          <span className="text-muted-foreground">total clicks</span>
+        </p>
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-lg font-semibold">Recent activity</h2>
+        <ActivityFeed events={events} />
+      </div>
     </div>
   );
 }

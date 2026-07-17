@@ -216,6 +216,7 @@ export async function updateLink(
   // until the 24h TTL expires), not a performance detail.
   await redis.del(`${LINK_CACHE_PREFIX}${existing.slug}`);
   revalidatePath("/dashboard");
+  revalidatePath(`/dashboard/${linkId}`);
   return { success: true, data: toResult(updated) };
 }
 
@@ -241,6 +242,7 @@ export async function deleteLink(linkId: string): Promise<ActionResult<{ id: str
 
   await redis.del(`${LINK_CACHE_PREFIX}${existing.slug}`);
   revalidatePath("/dashboard");
+  revalidatePath(`/dashboard/${linkId}`);
   return { success: true, data: { id: linkId } };
 }
 
@@ -276,5 +278,6 @@ export async function toggleLinkActive(
   // off, which is the same class of bug as the update case above.
   await redis.del(`${LINK_CACHE_PREFIX}${existing.slug}`);
   revalidatePath("/dashboard");
+  revalidatePath(`/dashboard/${linkId}`);
   return { success: true, data: toResult(updated) };
 }
