@@ -47,6 +47,10 @@ Same method, same machine, one warm-up request first (excluded) to populate the 
 
 **Where the time went:** the median improved (~480ms → ~407ms, roughly 15%) from removing Postgres from the warm path, but the win is smaller than the "edge cache" framing suggests, for a reason Step 13 already surfaced: this redirect runs as a Node.js Lambda, not an edge function, on this Next.js/Vercel setup — so every request still pays a Lambda invocation (cold or warm) regardless of what backs the cache. Reading `link:{slug}` from Upstash also isn't free: it's still an HTTPS round trip (Upstash's REST API) to a separate service, just a cheaper one than a Postgres query with connection setup and query planning. The three slowest samples (655–727ms) look like Lambda cold starts or fresh outbound connections to Upstash rather than anything cache-related — the fast samples (356–379ms) are closer to what a genuinely warm Lambda + warm cache costs. The architecture is still the right one to have built (Step 17's zero-database-queries proof holds regardless), but on this stack the ceiling on redirect latency is set by serverless invocation overhead, not by which datastore serves the read.
 
+### Step 23 — proof that click tracking doesn't block the redirect
+
+See [`docs/redirect-waterfall.png`](docs/redirect-waterfall.png). Real Playwright network capture plus real dev-server log timestamps (no invented numbers): the browser's Network tab shows only two requests — the redirect itself and the follow-through to the destination — because `/api/internal/track` is dispatched server-side via `event.waitUntil()` and never touches the client at all. Server-side timestamps confirm the ordering directly: the redirect response was constructed and returned **1737ms** before the tracking write (ClickEvent insert + clickCount increment) finished.
+
 ## Getting Started
 
 First, run the development server:
