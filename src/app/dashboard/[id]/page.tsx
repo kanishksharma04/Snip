@@ -2,9 +2,14 @@ import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { getSnipBaseUrl } from "@/lib/validations";
+import { getClicksOverTime } from "@/lib/stats";
 import { ActivityFeed } from "@/components/features/activity-feed";
 import { ActiveToggle } from "@/components/features/active-toggle";
 import { CopyButton } from "@/components/features/copy-button";
+import { ClicksChart } from "@/components/features/clicks-chart";
+
+// Default range until Step 29 adds the actual selector UI.
+const DEFAULT_RANGE_DAYS = 30;
 
 export default async function LinkDetailPage({
   params,
@@ -38,6 +43,7 @@ export default async function LinkDetailPage({
   });
 
   const shortUrl = `${getSnipBaseUrl()}/${link.slug}`;
+  const clicksOverTime = await getClicksOverTime(link.id, DEFAULT_RANGE_DAYS);
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -57,6 +63,11 @@ export default async function LinkDetailPage({
           <span className="font-medium">{link.clickCount}</span>{" "}
           <span className="text-muted-foreground">total clicks</span>
         </p>
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-lg font-semibold">Clicks over time</h2>
+        <ClicksChart data={clicksOverTime} days={DEFAULT_RANGE_DAYS} />
       </div>
 
       <div>
