@@ -1,9 +1,14 @@
 "use client";
 
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { DeviceCount } from "@/lib/stats";
 
 const COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed"];
+
+export function DevicePieChartSkeleton() {
+  return <Skeleton className="h-64 w-full" />;
+}
 
 export function DevicePieChart({ data }: { data: DeviceCount[] }) {
   if (data.length === 0) {

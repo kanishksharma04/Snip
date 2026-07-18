@@ -6,6 +6,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateTimeIst } from "@/lib/format";
 
 type ClickEventRow = {
@@ -15,6 +16,10 @@ type ClickEventRow = {
   device: string | null;
   referrer: string | null;
 };
+
+export function ActivityFeedSkeleton() {
+  return <Skeleton className="h-56 w-full" />;
+}
 
 export function ActivityFeed({ events }: { events: ClickEventRow[] }) {
   if (events.length === 0) {

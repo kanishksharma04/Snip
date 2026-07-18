@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
@@ -8,14 +9,48 @@ import {
   getDeviceBreakdown,
   getTopReferrers,
 } from "@/lib/stats";
-import { ActivityFeed } from "@/components/features/activity-feed";
+import { ActivityFeed, ActivityFeedSkeleton } from "@/components/features/activity-feed";
 import { ActiveToggle } from "@/components/features/active-toggle";
 import { CopyButton } from "@/components/features/copy-button";
-import { ClicksChart } from "@/components/features/clicks-chart";
-import { ReferrerTable } from "@/components/features/referrer-table";
-import { DevicePieChart } from "@/components/features/device-pie-chart";
-import { CountryList } from "@/components/features/country-list";
+import { ClicksChart, ClicksChartSkeleton } from "@/components/features/clicks-chart";
+import { ReferrerTable, ReferrerTableSkeleton } from "@/components/features/referrer-table";
+import { DevicePieChart, DevicePieChartSkeleton } from "@/components/features/device-pie-chart";
+import { CountryList, CountryListSkeleton } from "@/components/features/country-list";
 import { RangeTabs, parseRangeDays } from "@/components/features/range-tabs";
+
+// Each stats section fetches and renders independently inside its own
+// Suspense boundary, so a slow or failing query (e.g. once Step 31 seeds
+// 100k rows) only stalls/breaks its own card instead of the whole page —
+// and a thrown error here bubbles to error.tsx instead of a blank page.
+async function ClicksOverTimeSection({ linkId, days }: { linkId: string; days: number }) {
+  const data = await getClicksOverTime(linkId, days);
+  return <ClicksChart data={data} days={days} />;
+}
+
+async function ReferrersSection({ linkId, days }: { linkId: string; days: number }) {
+  const data = await getTopReferrers(linkId, days);
+  return <ReferrerTable data={data} />;
+}
+
+async function DevicesSection({ linkId, days }: { linkId: string; days: number }) {
+  const data = await getDeviceBreakdown(linkId, days);
+  return <DevicePieChart data={data} />;
+}
+
+async function CountriesSection({ linkId, days }: { linkId: string; days: number }) {
+  const data = await getCountryBreakdown(linkId, days);
+  return <CountryList data={data} />;
+}
+
+async function ActivitySection({ linkId }: { linkId: string }) {
+  const events = await db.clickEvent.findMany({
+    where: { linkId },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+    select: { id: true, createdAt: true, country: true, device: true, referrer: true },
+  });
+  return <ActivityFeed events={events} />;
+}
 
 export default async function LinkDetailPage({
   params,
@@ -44,20 +79,7 @@ export default async function LinkDetailPage({
     notFound();
   }
 
-  const events = await db.clickEvent.findMany({
-    where: { linkId: link.id },
-    orderBy: { createdAt: "desc" },
-    take: 20,
-    select: { id: true, createdAt: true, country: true, device: true, referrer: true },
-  });
-
   const shortUrl = `${getSnipBaseUrl()}/${link.slug}`;
-  const clicksOverTime = await getClicksOverTime(link.id, days);
-  const [referrers, devices, countries] = await Promise.all([
-    getTopReferrers(link.id, days),
-    getDeviceBreakdown(link.id, days),
-    getCountryBreakdown(link.id, days),
-  ]);
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -84,27 +106,37 @@ export default async function LinkDetailPage({
           <h2 className="text-lg font-semibold">Clicks over time</h2>
           <RangeTabs linkId={link.id} activeDays={days} />
         </div>
-        <ClicksChart data={clicksOverTime} days={days} />
+        <Suspense key={`clicks-${days}`} fallback={<ClicksChartSkeleton />}>
+          <ClicksOverTimeSection linkId={link.id} days={days} />
+        </Suspense>
       </div>
 
       <div className="grid gap-6 md:grid-cols-3">
         <div>
           <h2 className="mb-3 text-lg font-semibold">Top referrers</h2>
-          <ReferrerTable data={referrers} />
+          <Suspense key={`referrers-${days}`} fallback={<ReferrerTableSkeleton />}>
+            <ReferrersSection linkId={link.id} days={days} />
+          </Suspense>
         </div>
         <div>
           <h2 className="mb-3 text-lg font-semibold">Devices</h2>
-          <DevicePieChart data={devices} />
+          <Suspense key={`devices-${days}`} fallback={<DevicePieChartSkeleton />}>
+            <DevicesSection linkId={link.id} days={days} />
+          </Suspense>
         </div>
         <div>
           <h2 className="mb-3 text-lg font-semibold">Countries</h2>
-          <CountryList data={countries} />
+          <Suspense key={`countries-${days}`} fallback={<CountryListSkeleton />}>
+            <CountriesSection linkId={link.id} days={days} />
+          </Suspense>
         </div>
       </div>
 
       <div>
         <h2 className="mb-3 text-lg font-semibold">Recent activity</h2>
-        <ActivityFeed events={events} />
+        <Suspense fallback={<ActivityFeedSkeleton />}>
+          <ActivitySection linkId={link.id} />
+        </Suspense>
       </div>
     </div>
   );

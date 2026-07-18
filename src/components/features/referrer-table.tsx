@@ -6,7 +6,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { ReferrerCount } from "@/lib/stats";
+
+export function ReferrerTableSkeleton() {
+  return <Skeleton className="h-40 w-full" />;
+}
 
 export function ReferrerTable({ data }: { data: ReferrerCount[] }) {
   if (data.length === 0) {

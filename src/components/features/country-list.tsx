@@ -1,3 +1,4 @@
+import { Skeleton } from "@/components/ui/skeleton";
 import type { CountryCount } from "@/lib/stats";
 
 // Converts an ISO 3166-1 alpha-2 code (e.g. "US") to its flag emoji by
@@ -5,6 +6,10 @@ import type { CountryCount } from "@/lib/stats";
 function countryFlag(code: string): string {
   if (!/^[A-Z]{2}$/.test(code)) return "";
   return String.fromCodePoint(...[...code].map((c) => 127397 + c.charCodeAt(0)));
+}
+
+export function CountryListSkeleton() {
+  return <Skeleton className="h-40 w-full" />;
 }
 
 export function CountryList({ data }: { data: CountryCount[] }) {

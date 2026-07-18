@@ -30,20 +30,32 @@ type LinkRow = {
   expiresAt: Date | null;
 };
 
-export function LinksTable({ links }: { links: LinkRow[] }) {
+export function LinksTable({
+  links,
+  isFiltered = false,
+}: {
+  links: LinkRow[];
+  isFiltered?: boolean;
+}) {
   if (links.length === 0) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>No links yet</CardTitle>
+          <CardTitle>{isFiltered ? "No matching links" : "No links yet"}</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-muted-foreground text-sm">
-            You haven&apos;t created any links yet.{" "}
-            <Link href="/dashboard/new" className="text-primary underline">
-              Create your first link
-            </Link>
-            .
+            {isFiltered ? (
+              "No links match that search."
+            ) : (
+              <>
+                You haven&apos;t created any links yet.{" "}
+                <Link href="/dashboard/new" className="text-primary underline">
+                  Create your first link
+                </Link>
+                .
+              </>
+            )}
           </p>
         </CardContent>
       </Card>
