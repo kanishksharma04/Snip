@@ -15,14 +15,14 @@ import { ClicksChart } from "@/components/features/clicks-chart";
 import { ReferrerTable } from "@/components/features/referrer-table";
 import { DevicePieChart } from "@/components/features/device-pie-chart";
 import { CountryList } from "@/components/features/country-list";
-
-// Default range until Step 29 adds the actual selector UI.
-const DEFAULT_RANGE_DAYS = 30;
+import { RangeTabs, parseRangeDays } from "@/components/features/range-tabs";
 
 export default async function LinkDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ range?: string }>;
 }) {
   const session = await getSession();
   const userId = session?.user?.id;
@@ -31,6 +31,7 @@ export default async function LinkDetailPage({
   }
 
   const { id } = await params;
+  const days = parseRangeDays((await searchParams).range);
 
   // Ownership check: a link that exists but belongs to someone else 404s
   // exactly like one that doesn't exist at all — never a distinct "not
@@ -51,11 +52,11 @@ export default async function LinkDetailPage({
   });
 
   const shortUrl = `${getSnipBaseUrl()}/${link.slug}`;
-  const clicksOverTime = await getClicksOverTime(link.id, DEFAULT_RANGE_DAYS);
+  const clicksOverTime = await getClicksOverTime(link.id, days);
   const [referrers, devices, countries] = await Promise.all([
-    getTopReferrers(link.id, DEFAULT_RANGE_DAYS),
-    getDeviceBreakdown(link.id, DEFAULT_RANGE_DAYS),
-    getCountryBreakdown(link.id, DEFAULT_RANGE_DAYS),
+    getTopReferrers(link.id, days),
+    getDeviceBreakdown(link.id, days),
+    getCountryBreakdown(link.id, days),
   ]);
 
   return (
@@ -79,8 +80,11 @@ export default async function LinkDetailPage({
       </div>
 
       <div>
-        <h2 className="mb-3 text-lg font-semibold">Clicks over time</h2>
-        <ClicksChart data={clicksOverTime} days={DEFAULT_RANGE_DAYS} />
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Clicks over time</h2>
+          <RangeTabs linkId={link.id} activeDays={days} />
+        </div>
+        <ClicksChart data={clicksOverTime} days={days} />
       </div>
 
       <div className="grid gap-6 md:grid-cols-3">
