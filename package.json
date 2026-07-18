@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:check": "tsx --env-file=.env.local scripts/db-check.ts",
+    "db:seed": "tsx --env-file=.env.local prisma/seed.ts",
     "test": "vitest run",
     "postinstall": "prisma generate"
   },
