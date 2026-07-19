@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 
-function dateOnlyUTC(date: Date): Date {
+export function dateOnlyUTC(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 

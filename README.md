@@ -66,6 +66,19 @@ Step 31 seeded 103,379 real `ClickEvent` rows across 20 links over 90 days. This
 
 **The three `GROUP BY` queries degrade for a real, specific reason, not a vague "aggregation is slow":** the planner does *not* use the `(linkId, createdAt)` composite index for these. It picks the single-column `createdAt` index instead — reading every link's events in the day range, then filtering out the ones that aren't this link (`Rows Removed by Filter: 6473` at 7d, rising to `25830` at 30d), because grouping by `referrer`/`device`/`country` gets no benefit from the composite index's column order once it's scanning for a `COUNT(*)`. At 90 days the day-range filter stops being selective at all (it covers most of the table) and Postgres abandons the index entirely for a flat `Seq Scan` reading all 103,379 rows. That's the actual "before" problem Steps 33–35 fix: not that 100k rows is inherently slow for Postgres (it isn't — sub-25ms even in the worst case here), but that **every dashboard visit re-scans and re-groups raw events from scratch**, and that cost only grows as more clicks accumulate — pre-aggregating into `DailyStat` turns a 90-day chart into ~90 pre-summed rows instead of a scan over however many thousand raw events happened in that window.
 
+### Step 35 — after: reading from `DailyStat` instead of raw events
+
+Step 34's real authenticated cron call (used to verify the endpoint, per that step's own DONE WHEN) genuinely aggregated one real day and then applied real 30-day retention against the seeded data — deleting `ClickEvent` rows older than 30 days, exactly as designed. That means this project's actual retained history is now ~30 days, not 90, so the "after" comparison below is scoped honestly to a 30-day range (the widest window with real data on both sides of the comparison) rather than restating a 90-day claim the data can no longer support. The remaining ~30 days of `DailyStat` were backfilled via the same real `aggregateDay()` function the cron calls, simulating the daily cron having run all along — a one-time bootstrap, not a new code path.
+
+Same method as Step 32 (`EXPLAIN ANALYZE`, server-side execution time — application-level wall-clock timing was tried first but was dominated by Neon connection/network round-trip variance between runs, the same effect Step 19 already found, so it wasn't a reliable signal here), same link, same 30-day window, same underlying data — only the query shape changes:
+
+| Query | Before (raw `ClickEvent` scan) | After (`DailyStat` + today's live events) |
+|---|---|---|
+| Clicks over time | 1.43 ms, 9,856 rows read | 0.08 ms, 30 rows read |
+| Top referrers | 7.67 ms, full-table scan (35,680 rows), 25,824 filtered out | 0.73 ms, today-only scan (~1,400 rows) |
+
+Clicks-over-time went from an `Index Only Scan` reading every raw event in range to a `Bitmap Index Scan` on `DailyStat`'s `(linkId, date)` unique index reading exactly the 30 day-rows requested — an ~18x drop in execution time driven directly by reading 30 rows instead of 9,856. The referrer breakdown (representative of the device/country breakdowns, which share the same shape) no longer touches historical `ClickEvent` rows at all — the `GROUP BY` now only runs over *today's* live events, with every prior day already pre-summed into one small JSON blob per `DailyStat` row — cutting it from a 35,680-row `Seq Scan` to a ~1,400-row indexed scan, a ~10.5x improvement. Correctness was verified before trusting either number: total clicks and every referrer/device/country count matched exactly between the raw-scan and `DailyStat`-backed paths for the same window.
+
 ## Getting Started
 
 First, run the development server:
