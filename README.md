@@ -51,6 +51,21 @@ Same method, same machine, one warm-up request first (excluded) to populate the 
 
 See [`docs/redirect-waterfall.png`](docs/redirect-waterfall.png). Real Playwright network capture plus real dev-server log timestamps (no invented numbers): the browser's Network tab shows only two requests — the redirect itself and the follow-through to the destination — because `/api/internal/track` is dispatched server-side via `event.waitUntil()` and never touches the client at all. Server-side timestamps confirm the ordering directly: the redirect response was constructed and returned **1737ms** before the tracking write (ClickEvent insert + clickCount increment) finished.
 
+### Step 32 — aggregation baseline, before `DailyStat` (Phase 6)
+
+Step 31 seeded 103,379 real `ClickEvent` rows across 20 links over 90 days. This measures the four queries `src/lib/stats.ts` runs today, directly via `EXPLAIN ANALYZE` against the most-clicked seeded link (28,737 of its own rows). Full raw output: [`docs/explain-analyze-before.txt`](docs/explain-analyze-before.txt).
+
+| Query | 7d | 30d | 90d |
+|---|---|---|---|
+| `getClicksOverTime` (raw row scan) | 0.43 ms | 1.51 ms | 4.22 ms |
+| `getTopReferrers` (`GROUP BY referrer`) | 4.46 ms | 17.12 ms | 21.67 ms |
+| `getDeviceBreakdown` (`GROUP BY device`) | 4.65 ms | 18.10 ms | 21.53 ms |
+| `getCountryBreakdown` (`GROUP BY country`) | 4.86 ms | 16.91 ms | 20.77 ms |
+
+**The row-scan query stays fast** — `getClicksOverTime` only filters on `(linkId, createdAt)`, which is exactly the composite index already covers, so Postgres answers it with an `Index Only Scan` (zero/near-zero heap fetches) and it scales gently with rows returned (2,464 → 9,860 → 28,737).
+
+**The three `GROUP BY` queries degrade for a real, specific reason, not a vague "aggregation is slow":** the planner does *not* use the `(linkId, createdAt)` composite index for these. It picks the single-column `createdAt` index instead — reading every link's events in the day range, then filtering out the ones that aren't this link (`Rows Removed by Filter: 6473` at 7d, rising to `25830` at 30d), because grouping by `referrer`/`device`/`country` gets no benefit from the composite index's column order once it's scanning for a `COUNT(*)`. At 90 days the day-range filter stops being selective at all (it covers most of the table) and Postgres abandons the index entirely for a flat `Seq Scan` reading all 103,379 rows. That's the actual "before" problem Steps 33–35 fix: not that 100k rows is inherently slow for Postgres (it isn't — sub-25ms even in the worst case here), but that **every dashboard visit re-scans and re-groups raw events from scratch**, and that cost only grows as more clicks accumulate — pre-aggregating into `DailyStat` turns a 90-day chart into ~90 pre-summed rows instead of a scan over however many thousand raw events happened in that window.
+
 ## Getting Started
 
 First, run the development server:

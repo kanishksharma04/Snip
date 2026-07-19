@@ -1,0 +1,196 @@
+Snip — Step 32 aggregation baseline
+Captured: 2026-07-29T11:56:22Z
+Database: Neon Postgres (dev branch), ClickEvent rows: 103379, Link rows: 20
+Target link: id=cms60z8130000avy2sza7p8ul slug=DkwR8rL clickCount=28737 (the most-clicked seeded link)
+Existing indexes: ClickEvent_linkId_createdAt_idx (linkId, createdAt), ClickEvent_createdAt_idx (createdAt)
+These are the exact SQL shapes src/lib/stats.ts issues today, run directly via EXPLAIN ANALYZE.
+
+==================================================================
+getClicksOverTime — range=7d
+==================================================================
+                                                                         QUERY PLAN                                                                          
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using "ClickEvent_linkId_createdAt_idx" on "ClickEvent"  (cost=0.42..164.08 rows=2383 width=8) (actual time=0.029..0.328 rows=2464 loops=1)
+   Index Cond: (("linkId" = 'cms60z8130000avy2sza7p8ul'::text) AND ("createdAt" >= (now() - '7 days'::interval)))
+   Heap Fetches: 0
+ Planning Time: 0.090 ms
+ Execution Time: 0.426 ms
+(5 rows)
+
+
+==================================================================
+getClicksOverTime — range=30d
+==================================================================
+                                                                         QUERY PLAN                                                                          
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using "ClickEvent_linkId_createdAt_idx" on "ClickEvent"  (cost=0.42..653.46 rows=9852 width=8) (actual time=0.030..1.133 rows=9860 loops=1)
+   Index Cond: (("linkId" = 'cms60z8130000avy2sza7p8ul'::text) AND ("createdAt" >= (now() - '30 days'::interval)))
+   Heap Fetches: 0
+ Planning Time: 0.089 ms
+ Execution Time: 1.506 ms
+(5 rows)
+
+
+==================================================================
+getClicksOverTime — range=90d
+==================================================================
+                                                                           QUERY PLAN                                                                           
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using "ClickEvent_linkId_createdAt_idx" on "ClickEvent"  (cost=0.42..1896.58 rows=28808 width=8) (actual time=0.016..3.230 rows=28737 loops=1)
+   Index Cond: (("linkId" = 'cms60z8130000avy2sza7p8ul'::text) AND ("createdAt" >= (now() - '90 days'::interval)))
+   Heap Fetches: 13
+ Planning Time: 0.152 ms
+ Execution Time: 4.216 ms
+(5 rows)
+
+
+==================================================================
+getTopReferrers — range=7d
+==================================================================
+                                                                       QUERY PLAN                                                                       
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate  (cost=476.51..476.56 rows=5 width=18) (actual time=4.427..4.429 rows=5 loops=1)
+   Group Key: referrer
+   Batches: 1  Memory Usage: 24kB
+   ->  Index Scan using "ClickEvent_createdAt_idx" on "ClickEvent"  (cost=0.30..464.59 rows=2383 width=10) (actual time=0.026..3.900 rows=2464 loops=1)
+         Index Cond: ("createdAt" >= (now() - '7 days'::interval))
+         Filter: ("linkId" = 'cms60z8130000avy2sza7p8ul'::text)
+         Rows Removed by Filter: 6471
+ Planning Time: 0.109 ms
+ Execution Time: 4.459 ms
+(9 rows)
+
+
+==================================================================
+getTopReferrers — range=30d
+==================================================================
+                                                                        QUERY PLAN                                                                        
+----------------------------------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate  (cost=1947.74..1947.79 rows=5 width=18) (actual time=17.083..17.085 rows=5 loops=1)
+   Group Key: referrer
+   Batches: 1  Memory Usage: 24kB
+   ->  Index Scan using "ClickEvent_createdAt_idx" on "ClickEvent"  (cost=0.30..1898.48 rows=9852 width=10) (actual time=0.029..15.011 rows=9860 loops=1)
+         Index Cond: ("createdAt" >= (now() - '30 days'::interval))
+         Filter: ("linkId" = 'cms60z8130000avy2sza7p8ul'::text)
+         Rows Removed by Filter: 25830
+ Planning Time: 0.110 ms
+ Execution Time: 17.117 ms
+(9 rows)
+
+
+==================================================================
+getTopReferrers — range=90d
+==================================================================
+                                                       QUERY PLAN                                                        
+-------------------------------------------------------------------------------------------------------------------------
+ HashAggregate  (cost=4135.62..4135.67 rows=5 width=18) (actual time=21.622..21.624 rows=5 loops=1)
+   Group Key: referrer
+   Batches: 1  Memory Usage: 24kB
+   ->  Seq Scan on "ClickEvent"  (cost=0.00..3991.58 rows=28808 width=10) (actual time=0.010..16.911 rows=28737 loops=1)
+         Filter: (("linkId" = 'cms60z8130000avy2sza7p8ul'::text) AND ("createdAt" >= (now() - '90 days'::interval)))
+         Rows Removed by Filter: 74642
+ Planning Time: 0.177 ms
+ Execution Time: 21.666 ms
+(8 rows)
+
+
+==================================================================
+getDeviceBreakdown — range=7d
+==================================================================
+                                                                      QUERY PLAN                                                                       
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate  (cost=476.51..476.54 rows=3 width=15) (actual time=4.621..4.623 rows=3 loops=1)
+   Group Key: device
+   Batches: 1  Memory Usage: 24kB
+   ->  Index Scan using "ClickEvent_createdAt_idx" on "ClickEvent"  (cost=0.30..464.59 rows=2383 width=7) (actual time=0.023..4.144 rows=2464 loops=1)
+         Index Cond: ("createdAt" >= (now() - '7 days'::interval))
+         Filter: ("linkId" = 'cms60z8130000avy2sza7p8ul'::text)
+         Rows Removed by Filter: 6470
+ Planning Time: 0.111 ms
+ Execution Time: 4.653 ms
+(9 rows)
+
+
+==================================================================
+getDeviceBreakdown — range=30d
+==================================================================
+                                                                       QUERY PLAN                                                                        
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate  (cost=1947.74..1947.77 rows=3 width=15) (actual time=18.064..18.066 rows=3 loops=1)
+   Group Key: device
+   Batches: 1  Memory Usage: 24kB
+   ->  Index Scan using "ClickEvent_createdAt_idx" on "ClickEvent"  (cost=0.30..1898.48 rows=9852 width=7) (actual time=0.040..16.090 rows=9860 loops=1)
+         Index Cond: ("createdAt" >= (now() - '30 days'::interval))
+         Filter: ("linkId" = 'cms60z8130000avy2sza7p8ul'::text)
+         Rows Removed by Filter: 25830
+ Planning Time: 0.113 ms
+ Execution Time: 18.100 ms
+(9 rows)
+
+
+==================================================================
+getDeviceBreakdown — range=90d
+==================================================================
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ HashAggregate  (cost=4135.62..4135.65 rows=3 width=15) (actual time=21.492..21.494 rows=3 loops=1)
+   Group Key: device
+   Batches: 1  Memory Usage: 24kB
+   ->  Seq Scan on "ClickEvent"  (cost=0.00..3991.58 rows=28808 width=7) (actual time=0.012..16.757 rows=28737 loops=1)
+         Filter: (("linkId" = 'cms60z8130000avy2sza7p8ul'::text) AND ("createdAt" >= (now() - '90 days'::interval)))
+         Rows Removed by Filter: 74642
+ Planning Time: 0.227 ms
+ Execution Time: 21.526 ms
+(8 rows)
+
+
+==================================================================
+getCountryBreakdown — range=7d
+==================================================================
+                                                                      QUERY PLAN                                                                       
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate  (cost=476.51..476.61 rows=10 width=11) (actual time=4.820..4.823 rows=10 loops=1)
+   Group Key: country
+   Batches: 1  Memory Usage: 24kB
+   ->  Index Scan using "ClickEvent_createdAt_idx" on "ClickEvent"  (cost=0.30..464.59 rows=2383 width=3) (actual time=0.025..4.286 rows=2464 loops=1)
+         Index Cond: ("createdAt" >= (now() - '7 days'::interval))
+         Filter: ("linkId" = 'cms60z8130000avy2sza7p8ul'::text)
+         Rows Removed by Filter: 6470
+ Planning Time: 0.132 ms
+ Execution Time: 4.857 ms
+(9 rows)
+
+
+==================================================================
+getCountryBreakdown — range=30d
+==================================================================
+                                                                       QUERY PLAN                                                                        
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate  (cost=1947.72..1947.82 rows=10 width=11) (actual time=16.877..16.879 rows=10 loops=1)
+   Group Key: country
+   Batches: 1  Memory Usage: 24kB
+   ->  Index Scan using "ClickEvent_createdAt_idx" on "ClickEvent"  (cost=0.30..1898.46 rows=9852 width=3) (actual time=0.028..15.155 rows=9860 loops=1)
+         Index Cond: ("createdAt" >= (now() - '30 days'::interval))
+         Filter: ("linkId" = 'cms60z8130000avy2sza7p8ul'::text)
+         Rows Removed by Filter: 25829
+ Planning Time: 0.109 ms
+ Execution Time: 16.913 ms
+(9 rows)
+
+
+==================================================================
+getCountryBreakdown — range=90d
+==================================================================
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ HashAggregate  (cost=4135.62..4135.72 rows=10 width=11) (actual time=20.738..20.741 rows=10 loops=1)
+   Group Key: country
+   Batches: 1  Memory Usage: 24kB
+   ->  Seq Scan on "ClickEvent"  (cost=0.00..3991.58 rows=28808 width=3) (actual time=0.010..16.410 rows=28737 loops=1)
+         Filter: (("linkId" = 'cms60z8130000avy2sza7p8ul'::text) AND ("createdAt" >= (now() - '90 days'::interval)))
+         Rows Removed by Filter: 74642
+ Planning Time: 0.170 ms
+ Execution Time: 20.769 ms
+(8 rows)
+
+
