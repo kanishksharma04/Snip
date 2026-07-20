@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextFetchEvent, NextRequest } from "next/server";
 import { redis, LINK_CACHE_PREFIX } from "@/lib/redis";
 import { getGeo, hashIp, normalizeReferrer, parseUserAgent } from "@/lib/analytics";
+import { redirectLimit, retryAfterSeconds } from "@/lib/ratelimit";
 
 // HARD CONSTRAINT: this file must never import Prisma or anything that
 // transitively imports it (e.g. @/lib/db, @/lib/actions/*). On this Next.js
@@ -50,6 +51,21 @@ export async function proxy(request: NextRequest, event: NextFetchEvent) {
   // "JzjykHi" and "jzjykhi" are different links. Never lowercased here.
   const slug = request.nextUrl.pathname.slice(1);
   const cacheKey = `${LINK_CACHE_PREFIX}${slug}`;
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+
+  // Gates before the cache lookup, not after — a flood of requests for one
+  // IP shouldn't get to spend Redis/Postgres capacity just because they'd
+  // all be cheap cache hits individually.
+  const rateLimitResult = await redirectLimit.limit(ip);
+  if (!rateLimitResult.success) {
+    return new NextResponse("Too many requests. Please slow down and try again shortly.", {
+      status: 429,
+      headers: {
+        "Retry-After": String(retryAfterSeconds(rateLimitResult.reset)),
+        "Content-Type": "text/plain",
+      },
+    });
+  }
 
   // Cache-first: a warm slug completes the redirect with zero database
   // queries — this is the entire point of Phase 3.
@@ -78,7 +94,6 @@ export async function proxy(request: NextRequest, event: NextFetchEvent) {
   const redirectResponse = buildResponse(result, request.nextUrl.origin);
 
   if (result.found && result.isActive && !isLinkExpired(result)) {
-    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
     const { device, os, browser } = parseUserAgent(request.headers.get("user-agent") ?? "");
     const trackUrl = new URL("/api/internal/track", request.nextUrl.origin);
     event.waitUntil(

@@ -6,6 +6,7 @@ import { getSession } from "@/lib/session";
 import { generateSlug } from "@/lib/slug";
 import { customSlugSchema, destinationSchema, getSnipBaseUrl } from "@/lib/validations";
 import { redis, LINK_CACHE_PREFIX } from "@/lib/redis";
+import { authenticatedLinkCreationLimit, retryAfterSeconds } from "@/lib/ratelimit";
 import { Prisma, type Link } from "@/generated/prisma/client";
 import type { ActionResult } from "@/types/action";
 
@@ -75,6 +76,19 @@ export async function createLink(
   const userId = session?.user?.id;
   if (!userId) {
     return { success: false, error: "You must be signed in to create a link." };
+  }
+
+  // Server Actions have no HTTP status code to return a real 429 with — the
+  // idiom this codebase already uses for every other rejected input is an
+  // ActionResult failure, so an exceeded limit refuses the request the same
+  // way a taken slug or invalid URL does, rather than silently succeeding.
+  const rateLimitResult = await authenticatedLinkCreationLimit.limit(userId);
+  if (!rateLimitResult.success) {
+    const minutes = Math.ceil(retryAfterSeconds(rateLimitResult.reset) / 60);
+    return {
+      success: false,
+      error: `You've hit the hourly link creation limit (100/hour). Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+    };
   }
 
   const destinationResult = destinationSchema.safeParse(input.destination);
