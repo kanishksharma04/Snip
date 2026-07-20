@@ -17,6 +17,7 @@ import { ReferrerTable, ReferrerTableSkeleton } from "@/components/features/refe
 import { DevicePieChart, DevicePieChartSkeleton } from "@/components/features/device-pie-chart";
 import { CountryList, CountryListSkeleton } from "@/components/features/country-list";
 import { RangeTabs, parseRangeDays } from "@/components/features/range-tabs";
+import { QrCode } from "@/components/features/qr-code";
 
 // Each stats section fetches and renders independently inside its own
 // Suspense boundary, so a slow or failing query (e.g. once Step 31 seeds
@@ -99,6 +100,7 @@ export default async function LinkDetailPage({
           <span className="font-medium">{link.clickCount}</span>{" "}
           <span className="text-muted-foreground">total clicks</span>
         </p>
+        <QrCode linkId={link.id} slug={link.slug} />
       </div>
 
       <div>
