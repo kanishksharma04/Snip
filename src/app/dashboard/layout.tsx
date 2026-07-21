@@ -46,6 +46,10 @@ export default async function DashboardLayout({
               </span>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href="/dashboard/settings">API keys</Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <form action={signOutAction}>
               <DropdownMenuItem asChild>
                 <button type="submit" className="w-full text-left">

@@ -79,6 +79,29 @@ Same method as Step 32 (`EXPLAIN ANALYZE`, server-side execution time — applic
 
 Clicks-over-time went from an `Index Only Scan` reading every raw event in range to a `Bitmap Index Scan` on `DailyStat`'s `(linkId, date)` unique index reading exactly the 30 day-rows requested — an ~18x drop in execution time driven directly by reading 30 rows instead of 9,856. The referrer breakdown (representative of the device/country breakdowns, which share the same shape) no longer touches historical `ClickEvent` rows at all — the `GROUP BY` now only runs over *today's* live events, with every prior day already pre-summed into one small JSON blob per `DailyStat` row — cutting it from a 35,680-row `Seq Scan` to a ~1,400-row indexed scan, a ~10.5x improvement. Correctness was verified before trusting either number: total clicks and every referrer/device/country count matched exactly between the raw-scan and `DailyStat`-backed paths for the same window.
 
+## Public API
+
+Generate a key at `/dashboard/settings` — it's shown in full exactly once; Snip only ever stores its SHA-256 hash afterward. Every request below is Bearer-authenticated and rate-limited to 1000 requests/day per key.
+
+```bash
+# Create a link
+curl -X POST https://snip-blush.vercel.app/api/v1/links \
+  -H "Authorization: Bearer $SNIP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"destination": "https://example.com/hello"}'
+# -> 201 {"id":"...","slug":"...","shortUrl":"https://snip-blush.vercel.app/...","destination":"https://example.com/hello","clickCount":0,"isActive":true,"expiresAt":null,"createdAt":"..."}
+
+# List your links
+curl https://snip-blush.vercel.app/api/v1/links \
+  -H "Authorization: Bearer $SNIP_API_KEY"
+
+# Stats for one link (last 30 days: clicks over time, referrers, devices, countries)
+curl https://snip-blush.vercel.app/api/v1/links/{id}/stats \
+  -H "Authorization: Bearer $SNIP_API_KEY"
+```
+
+A missing/invalid/revoked key returns `401`; exceeding the daily limit returns `429` with a `Retry-After` header. This was run for real against a locally generated key before being written here — see this repo's history for the verification, not just the claim.
+
 ## Getting Started
 
 First, run the development server:

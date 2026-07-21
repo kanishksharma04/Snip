@@ -22,6 +22,7 @@ model User {
   accounts Account[]
   sessions Session[]
   links    Link[]
+  apiKeys  ApiKey[]
 }
 
 model Account {
@@ -116,4 +117,25 @@ model DailyStat {
   // a retried cron run double-counts instead of overwriting.
   @@unique([linkId, date])
   @@index([linkId, date])
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  userId     String
+  name       String
+  // Only the SHA-256 hash of the key is ever stored — the plaintext is
+  // shown to the user exactly once, at creation, and never persisted or
+  // recoverable afterward. keyHash is what an incoming request is looked up
+  // by; keyPrefix is only the first few characters, kept unhashed purely so
+  // the settings page can show "which key is this" without ever storing
+  // anything that could reconstruct the real secret.
+  keyHash    String    @unique
+  keyPrefix  String
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
