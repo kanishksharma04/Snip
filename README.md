@@ -59,8 +59,8 @@ Analytics reads are a second, separate concern from the redirect path: a daily c
 ### Setup
 
 ```bash
-git clone <this-repo>
-cd snip
+git clone https://github.com/kanishksharma04/Snip.git
+cd Snip
 npm install
 cp .env.example .env.local
 ```
