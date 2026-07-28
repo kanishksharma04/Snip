@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export default async function DashboardLayout({
   children,
@@ -31,34 +32,37 @@ export default async function DashboardLayout({
         <Link href="/dashboard" className="text-lg font-semibold">
           Snip
         </Link>
-        <DropdownMenu>
-          <DropdownMenuTrigger className="rounded-full">
-            <Avatar>
-              <AvatarImage src={user?.image ?? undefined} alt={user?.name ?? "User"} />
-              <AvatarFallback>{initials}</AvatarFallback>
-            </Avatar>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel className="flex flex-col">
-              <span className="font-medium">{user?.name}</span>
-              <span className="text-muted-foreground text-xs font-normal">
-                {user?.email}
-              </span>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-              <Link href="/dashboard/settings">API keys</Link>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <form action={signOutAction}>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <DropdownMenu>
+            <DropdownMenuTrigger className="rounded-full">
+              <Avatar>
+                <AvatarImage src={user?.image ?? undefined} alt={user?.name ?? "User"} />
+                <AvatarFallback>{initials}</AvatarFallback>
+              </Avatar>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel className="flex flex-col">
+                <span className="font-medium">{user?.name}</span>
+                <span className="text-muted-foreground text-xs font-normal">
+                  {user?.email}
+                </span>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
-                <button type="submit" className="w-full text-left">
-                  Sign out
-                </button>
+                <Link href="/dashboard/settings">API keys</Link>
               </DropdownMenuItem>
-            </form>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              <DropdownMenuSeparator />
+              <form action={signOutAction}>
+                <DropdownMenuItem asChild>
+                  <button type="submit" className="w-full text-left">
+                    Sign out
+                  </button>
+                </DropdownMenuItem>
+              </form>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </header>
       <main className="flex flex-1 flex-col">{children}</main>
     </div>

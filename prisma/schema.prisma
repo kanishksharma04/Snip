@@ -62,7 +62,12 @@ model VerificationToken {
 // Domain models.
 model Link {
   id          String    @id @default(cuid())
-  userId      String
+  // Nullable: Step 39's anonymous demo creates links with no owner at all,
+  // not links owned by some placeholder "system" user — a null userId can
+  // never match an authenticated user's `where: { userId }` dashboard
+  // queries, so anonymous links simply never appear in anyone's dashboard,
+  // by construction rather than by an extra flag.
+  userId      String?
   slug        String    @unique
   destination String
   title       String?
@@ -74,7 +79,7 @@ model Link {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
   clickEvents ClickEvent[]
   dailyStats  DailyStat[]
 
