@@ -1,4 +1,106 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Snip
+
+A production-shaped URL shortener: cache-first redirects, real click analytics backed by daily pre-aggregation, a public API with hashed keys, rate limiting, and an anonymous no-login demo. Built on Next.js 16, Postgres (Prisma 7), and Redis.
+
+## Features
+
+- Short link creation with auto-generated or custom slugs, optional expiry
+- Cache-first redirects (Redis, Postgres only on a cache miss) — see [Architecture](#architecture)
+- Non-blocking click tracking: user agent, geo, referrer, daily-rotating hashed IP
+- Dashboard with search, pagination, and per-link analytics (clicks over time, referrers, devices, countries), backed by a daily cron aggregation job instead of scanning raw events on every page load
+- Downloadable QR codes per link
+- Public API (`/api/v1/*`) authenticated with hashed API keys, shown in plaintext exactly once
+- Rate limiting on redirects, link creation, and the API (`@upstash/ratelimit`, sliding window)
+- Anonymous demo on the landing page (rate-limited, 24h auto-expiring links, no account needed)
+- Dark mode
+
+## Architecture
+
+The redirect path is the one piece of this app that runs on every single visit to a short link, so it's built to touch Postgres as rarely as possible:
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Proxy as proxy.ts
+    participant Redis
+    participant Resolve as /api/internal/resolve
+    participant Postgres
+    participant Track as /api/internal/track
+
+    Browser->>Proxy: GET /:slug
+    Proxy->>Proxy: rate limit check (100/min per IP)
+    Proxy->>Redis: GET link:{slug}
+    alt cache hit
+        Redis-->>Proxy: cached result
+    else cache miss
+        Proxy->>Resolve: POST { slug }
+        Resolve->>Postgres: SELECT link by slug
+        Resolve->>Redis: SET link:{slug} (24h TTL, or 60s if not found)
+        Resolve-->>Proxy: result
+    end
+    Proxy-->>Browser: 302 redirect
+    Proxy--)Track: waitUntil(POST click event) — fire-and-forget, after the response is already sent
+    Track->>Postgres: insert ClickEvent, increment Link.clickCount
+```
+
+The redirect is built and returned to the browser before click tracking is even dispatched — `event.waitUntil()` fires the tracking POST after the response, so a slow or failing analytics write can never delay or break a visitor's redirect (verified in [Step 23](#step-23--proof-that-click-tracking-doesnt-block-the-redirect)). See [Decisions worth defending](#decisions-worth-defending) for why this stays a fetch to a separate Node route instead of a direct Postgres call, even though this Next.js/Vercel setup turned out not to run it on the edge runtime.
+
+Analytics reads are a second, separate concern from the redirect path: a daily cron (`/api/cron/aggregate`) folds yesterday's `ClickEvent` rows into pre-summed `DailyStat` rows and prunes anything older than 30 days, so the dashboard reads ~30-90 pre-aggregated rows instead of re-scanning however many thousand raw events happened in the requested range (see [Step 35](#step-35--after-reading-from-dailystat-instead-of-raw-events)).
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 20.19+
+- A Postgres database (this project uses [Neon](https://neon.tech))
+- A Redis instance with a REST API (this project uses [Upstash](https://upstash.com))
+- A GitHub OAuth App (github.com/settings/developers) for sign-in
+
+### Setup
+
+```bash
+git clone <this-repo>
+cd snip
+npm install
+cp .env.example .env.local
+```
+
+Fill in `.env.local` — every variable it needs is listed there with a comment on where to get it (see [Environment variables](#environment-variables) below for the full reference). Then:
+
+```bash
+npx prisma migrate dev   # creates all tables in your database
+npm run dev              # http://localhost:3000
+```
+
+Optional, if you want non-trivial data to look at on the dashboard:
+
+```bash
+npm run db:seed          # ~100k synthetic clicks across 20 links over 90 days
+```
+
+### Environment variables
+
+| Variable | Required for | Notes |
+|---|---|---|
+| `DATABASE_URL` | Everything | Pooled Postgres connection string |
+| `DIRECT_URL` | `prisma migrate` | Direct (non-pooled) connection string |
+| `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET` | Sign-in | From a GitHub OAuth App; local dev needs its own app with callback `http://localhost:3000/api/auth/callback/github` |
+| `AUTH_SECRET` | Sign-in | `openssl rand -base64 33` |
+| `SNIP_BASE_URL` | Link creation, QR codes, the public API's `shortUrl` field | Your deployed origin — also used to reject a destination that points back at Snip itself |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Redirects, caching, rate limiting | From an Upstash Redis database |
+| `IP_HASH_SALT` | Click tracking | `openssl rand -hex 32` — see [hashed IPs](#decisions-worth-defending) below |
+| `CRON_SECRET` | The aggregation cron | `openssl rand -base64 33` — must match what's configured wherever the cron is triggered from |
+
+### Useful scripts
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Start the dev server |
+| `npm run build` / `npm start` | Production build and start |
+| `npm run lint` | ESLint |
+| `npm test` | Vitest unit tests |
+| `npm run db:check` | Verify the configured `DATABASE_URL` actually connects |
+| `npm run db:seed` | Seed ~100k synthetic `ClickEvent` rows (see [Step 31](#step-32--aggregation-baseline-before-dailystat-phase-6)) |
 
 ## Infrastructure
 
@@ -79,6 +181,23 @@ Same method as Step 32 (`EXPLAIN ANALYZE`, server-side execution time — applic
 
 Clicks-over-time went from an `Index Only Scan` reading every raw event in range to a `Bitmap Index Scan` on `DailyStat`'s `(linkId, date)` unique index reading exactly the 30 day-rows requested — an ~18x drop in execution time driven directly by reading 30 rows instead of 9,856. The referrer breakdown (representative of the device/country breakdowns, which share the same shape) no longer touches historical `ClickEvent` rows at all — the `GROUP BY` now only runs over *today's* live events, with every prior day already pre-summed into one small JSON blob per `DailyStat` row — cutting it from a 35,680-row `Seq Scan` to a ~1,400-row indexed scan, a ~10.5x improvement. Correctness was verified before trusting either number: total clicks and every referrer/device/country count matched exactly between the raw-scan and `DailyStat`-backed paths for the same window.
 
+### Step 40 — Lighthouse audit of `/dashboard`
+
+Real Lighthouse run against a production build (`next build && next start`), authenticated, headless Chrome:
+
+| Category | Score |
+|---|---|
+| Performance | 89 |
+| Accessibility | 98 |
+| Best Practices | 100 |
+| SEO | 100 |
+
+Performance's sub-metrics: First Contentful Paint 98/100 (1.3s), Speed Index 99/100 (2.2s), Total Blocking Time 100/100 (30ms), Cumulative Layout Shift 100/100 (0) — all genuinely excellent. The only weak sub-metric is Largest Contentful Paint, 58/100 (3.7s), which is the sole reason the category lands at 89 instead of ≥90.
+
+That LCP number is contaminated, not a real slow paint — traced via raw CDP network capture (`Network.requestWillBeSentExtraInfo`), not guessed: roughly 2 seconds after a correctly authenticated load, Next.js's client router fires its own background "metadata-only" prefetch revalidation of the current route (identifiable by a `next-router-state-tree` header ending in `"metadata-only"`). That request carries the real, valid session cookie — confirmed directly at the network layer — yet still triggers a client-side navigation attempt to `/login?callbackUrl=/dashboard`, which extends the trace window Lighthouse uses to determine "largest paint." Every *real* navigation (`curl` with the session cookie, a fresh page load, a hard refresh) authenticates and renders correctly, consistently, every time — this only happens on Next's own internal revalidation fetch, never on an actual page view.
+
+**Not fixed, by deliberate choice:** the underlying cause is this Next.js version's router-prefetch internals colliding with a page-level `redirect()`-based auth check, not application logic in Snip. Multiple mitigations were tried — priming an authenticated session via cookie injection, blocking the specific prefetch request at the network layer, disabling Lighthouse's storage reset, driving the audit through Lighthouse's Node API with a raw CDP session — none produced a clean trace without either reintroducing the artifact or losing confidence that the number reflected the real page rather than a different workaround artifact. A real fix would mean restructuring how every protected route checks auth (moving it out of page-level `redirect()` and into a middleware-level guard) — a genuine architecture change, and a riskier one to make at the very last step of a 40-step build than to document honestly and leave for deliberate, dedicated follow-up.
+
 ## Public API
 
 Generate a key at `/dashboard/settings` — it's shown in full exactly once; Snip only ever stores its SHA-256 hash afterward. Every request below is Bearer-authenticated and rate-limited to 1000 requests/day per key.
@@ -102,34 +221,15 @@ curl https://snip-blush.vercel.app/api/v1/links/{id}/stats \
 
 A missing/invalid/revoked key returns `401`; exceeding the daily limit returns `429` with a `Retry-After` header. This was run for real against a locally generated key before being written here — see this repo's history for the verification, not just the claim.
 
-## Getting Started
+## Decisions worth defending
 
-First, run the development server:
+**302, not 301, for the redirect.** A 301 tells the browser (and any CDN in between) that the mapping is permanent, so it gets cached and every future visit skips this server entirely — the click counter silently stops incrementing, and a link can never be repointed or disabled again. A 302 is re-checked on every visit, which is the whole point of a link shortener with analytics: `Cache-Control: no-store` is set explicitly on top of that so nothing caches it anyway.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+**Cache-first redirects, even though this isn't actually running on the edge.** Step 13 originally justified `proxy.ts` reading Redis directly (instead of querying Postgres inline) as an edge-runtime constraint. A real `vercel inspect` on a deployed build later showed this Next.js/Vercel combination runs the proxy as a plain Node.js Lambda (`nodejs24.x`, `edge: null`) — the technical reason no longer holds. The architecture was kept anyway (a deliberate, documented call, not an oversight): cache-first is still the right shape for a redirect hot path regardless of runtime, and Step 17 already proved warm slugs resolve with zero Postgres queries. What that finding does change is the *latency* story — Step 19's measurement shows the win from caching is real but smaller than "edge cache" framing implies, because every request still pays a Lambda invocation regardless of what backs the cache.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+**Raw events, then daily aggregates — not aggregates from day one.** `ClickEvent` rows are still written on every click and read directly for anything happening *today* (see [Architecture](#architecture)); only history before today gets folded into `DailyStat`. Aggregating from day one would mean designing the aggregation shape before there was real data or real query patterns to design it around — Phase 6 (Steps 31–35) exists specifically to measure the raw-scan cost first ([Step 32](#step-32--aggregation-baseline-before-dailystat-phase-6)), so the case for pre-aggregation is a measured ~10-18x, not an assumed one ([Step 35](#step-35--after-reading-from-dailystat-instead-of-raw-events)).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**Hashed IPs with a rotating salt, not raw IPs.** The raw visitor IP is never stored anywhere. `hashIp()` runs `SHA-256(ip + IP_HASH_SALT + today's UTC date)`, truncated to 16 hex chars — the date component means the same visitor hashes to a *different* value tomorrow, so nothing here can link a visitor's activity across days, only count unique visitors *within* a day (which is all the dashboard needs `uniqueVisitors` for). This is a one-way function with no realistic reversal path, unlike storing the IP itself or a stable (non-rotating) hash of it.
 
 ## Deployment
 
@@ -146,6 +246,10 @@ Deployed on Vercel, connected to the same Neon Postgres project used in developm
 | `AUTH_SECRET` | Production | Independent from the value in `.env.local` — dev and prod intentionally use different session secrets |
 | `AUTH_GITHUB_ID` | Production | Client ID of a **separate** production GitHub OAuth App (dev keeps its own app with a `localhost` callback) |
 | `AUTH_GITHUB_SECRET` | Production | Secret for the same production GitHub OAuth App |
+| `SNIP_BASE_URL` | Production | `https://snip-blush.vercel.app` — used to build every short URL and QR code, and to reject a destination pointing back at Snip itself |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Production | Independent from the values in `.env.local` — dev and prod point at the same shared Upstash instance here, but see [Infrastructure](#infrastructure) for the constraints that come with that |
+| `IP_HASH_SALT` | Production | Independent from `.env.local`'s value — dev and prod should never share this, or a hash computed in one environment would be reversible by testing candidate IPs in the other |
+| `CRON_SECRET` | Production | Must match what Vercel Cron sends as `Authorization: Bearer $CRON_SECRET` when it calls `/api/cron/aggregate` on the schedule in `vercel.json` |
 
 ### Production GitHub OAuth App
 
