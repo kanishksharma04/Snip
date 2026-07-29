@@ -1,32 +1,29 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { db } from "@/lib/db";
-import { LinksTable } from "@/components/features/links-table";
+import { LinksTable, LinksTableSkeleton } from "@/components/features/links-table";
 import { SearchForm } from "@/components/features/search-form";
 import { PaginationControls, parsePage } from "@/components/features/pagination-controls";
 
 const PAGE_SIZE = 20;
 
-export default async function DashboardPage({
-  searchParams,
+// A file-based loading.tsx at this segment would implicitly wrap this
+// page *and every nested route below it* (/dashboard/new,
+// /dashboard/settings, /dashboard/[id], ...) in one Suspense boundary that
+// pre-commits to a 200 status as soon as it starts streaming — confirmed
+// directly: it silently broke the HTTP status of every redirect()/notFound()
+// anywhere in this subtree. An inline Suspense around just this page's own
+// data-dependent section gets the same loading UX without that blast radius.
+async function LinksSection({
+  userId,
+  query,
+  page,
 }: {
-  searchParams: Promise<{ q?: string; page?: string }>;
+  userId: string;
+  query: string;
+  page: number;
 }) {
-  const session = await getSession();
-
-  if (!session) {
-    redirect("/login?callbackUrl=/dashboard");
-  }
-
-  const userId = session.user?.id;
-  if (!userId) {
-    redirect("/login?callbackUrl=/dashboard");
-  }
-
-  const { q, page: pageParam } = await searchParams;
-  const query = q?.trim() ?? "";
-  const page = parsePage(pageParam);
-
   // select, not a bare findMany: destination can be up to 2048 chars and we
   // only ever render a truncated form of it. clickCount is read straight off
   // the row rather than aggregated over ClickEvent — that's the whole reason
@@ -65,13 +62,43 @@ export default async function DashboardPage({
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <div className="p-6">
-      <h1 className="mb-6 text-xl font-semibold">Your links</h1>
-      <SearchForm defaultValue={query} />
+    <>
       <LinksTable links={links} isFiltered={query.length > 0} />
       <div className="mt-4">
         <PaginationControls page={page} totalPages={totalPages} q={query} />
       </div>
+    </>
+  );
+}
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; page?: string }>;
+}) {
+  // dashboard/layout.tsx already checks this for the correct HTTP status
+  // (see its comment), but layout and page render concurrently rather than
+  // the layout strictly gating the page — confirmed directly: trusting a
+  // non-null assertion here crashed with a real, logged TypeError instead of
+  // ever reaching the layout's redirect. getSession() is React
+  // cache()-wrapped, so this re-check is a dedup, not a second real query.
+  const session = await getSession();
+  const userId = session?.user?.id;
+  if (!userId) {
+    redirect("/login?callbackUrl=/dashboard");
+  }
+
+  const { q, page: pageParam } = await searchParams;
+  const query = q?.trim() ?? "";
+  const page = parsePage(pageParam);
+
+  return (
+    <div className="p-6">
+      <h1 className="mb-6 text-xl font-semibold">Your links</h1>
+      <SearchForm defaultValue={query} />
+      <Suspense key={`${query}-${page}`} fallback={<LinksTableSkeleton />}>
+        <LinksSection userId={userId} query={query} page={page} />
+      </Suspense>
     </div>
   );
 }

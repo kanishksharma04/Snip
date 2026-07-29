@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
+import { getOwnedLink } from "@/lib/links";
 import { getSnipBaseUrl } from "@/lib/validations";
 import {
   getClicksOverTime,
@@ -60,6 +61,14 @@ export default async function LinkDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ range?: string }>;
 }) {
+  // Session presence and link ownership are already checked by this
+  // segment's layout.tsx (see its comment for why that check has to live
+  // there, not here, to get a correct HTTP status). That layout and this
+  // page render concurrently rather than the layout strictly gating the
+  // page — confirmed directly: trusting a non-null assertion here crashed
+  // with a real, logged TypeError instead of ever reaching the layout's
+  // outcome. getSession()/getOwnedLink are both cache()-wrapped, so these
+  // re-checks are dedup, not second real queries.
   const session = await getSession();
   const userId = session?.user?.id;
   if (!userId) {
@@ -69,13 +78,7 @@ export default async function LinkDetailPage({
   const { id } = await params;
   const days = parseRangeDays((await searchParams).range);
 
-  // Ownership check: a link that exists but belongs to someone else 404s
-  // exactly like one that doesn't exist at all — never a distinct "not
-  // yours" response that would let a user probe which link IDs are real.
-  const link = await db.link.findFirst({
-    where: { id, userId },
-    select: { id: true, slug: true, destination: true, clickCount: true, isActive: true },
-  });
+  const link = await getOwnedLink(id, userId);
   if (!link) {
     notFound();
   }

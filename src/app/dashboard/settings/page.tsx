@@ -4,6 +4,12 @@ import { getSession } from "@/lib/session";
 import { ApiKeyManager } from "@/components/features/api-key-manager";
 
 export default async function SettingsPage() {
+  // dashboard/layout.tsx already checks this for the correct HTTP status
+  // (see its comment), but layout and page render concurrently rather than
+  // the layout strictly gating the page — confirmed directly: trusting a
+  // non-null assertion here crashed with a real, logged TypeError instead of
+  // ever reaching the layout's redirect. getSession() is React
+  // cache()-wrapped, so this re-check is a dedup, not a second real query.
   const session = await getSession();
   const userId = session?.user?.id;
   if (!userId) {

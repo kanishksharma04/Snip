@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { signOut } from "@/lib/auth";
 import { getSession } from "@/lib/session";
 import {
@@ -18,8 +19,20 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const session = await getSession();
-  const user = session?.user;
-  const initials = user?.name?.trim().charAt(0)?.toUpperCase() || "?";
+  // Every /dashboard/* route requires a session — enforced once, here, in the
+  // shared layout rather than per-page. This isn't just deduplication: this
+  // layout sits outside the Suspense boundary that dashboard/[id]/loading.tsx
+  // implicitly wraps its subtree in, so a redirect() thrown from inside a
+  // *page* component under a streaming loading.tsx boundary gets its status
+  // code silently downgraded to 200 (confirmed directly — real bug, not a
+  // hypothetical). A layout's redirect runs before any of that streaming
+  // commitment, so it actually produces a real 307 instead of a 200 the
+  // client happens to navigate away from.
+  if (!session?.user?.id) {
+    redirect("/login?callbackUrl=/dashboard");
+  }
+  const user = session.user;
+  const initials = user.name?.trim().charAt(0)?.toUpperCase() || "?";
 
   async function signOutAction() {
     "use server";
@@ -37,15 +50,15 @@ export default async function DashboardLayout({
           <DropdownMenu>
             <DropdownMenuTrigger className="rounded-full">
               <Avatar>
-                <AvatarImage src={user?.image ?? undefined} alt={user?.name ?? "User"} />
+                <AvatarImage src={user.image ?? undefined} alt={user.name ?? "User"} />
                 <AvatarFallback>{initials}</AvatarFallback>
               </Avatar>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel className="flex flex-col">
-                <span className="font-medium">{user?.name}</span>
+                <span className="font-medium">{user.name}</span>
                 <span className="text-muted-foreground text-xs font-normal">
-                  {user?.email}
+                  {user.email}
                 </span>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />

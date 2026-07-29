@@ -16,9 +16,20 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CopyShortUrlMenuItem } from "@/components/features/copy-short-url-menu-item";
+import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateIst, isPast } from "@/lib/format";
 import { getSnipBaseUrl } from "@/lib/validations";
 import { IconDots } from "@tabler/icons-react";
+
+export function LinksTableSkeleton() {
+  return (
+    <div className="flex flex-col gap-2">
+      {Array.from({ length: 5 }, (_, i) => (
+        <Skeleton key={i} className="h-10 w-full" />
+      ))}
+    </div>
+  );
+}
 
 type LinkRow = {
   id: string;
