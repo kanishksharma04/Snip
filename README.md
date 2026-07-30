@@ -47,6 +47,8 @@ The redirect is built and returned to the browser before click tracking is even 
 
 Analytics reads are a second, separate concern from the redirect path: a daily cron (`/api/cron/aggregate`) folds yesterday's `ClickEvent` rows into pre-summed `DailyStat` rows and prunes anything older than 30 days, so the dashboard reads ~30-90 pre-aggregated rows instead of re-scanning however many thousand raw events happened in the requested range (see [Step 35](#step-35--after-reading-from-dailystat-instead-of-raw-events)).
 
+If that cron ever silently stops firing — quota, an outage, a bug — `DailyStat` just quietly stops growing with nothing to notice it. `GET /api/cron/aggregate/health` (same Bearer auth as the cron itself) reports whether it has run within the last 36 hours (one full extra cycle of slack past its daily schedule), reading a single Redis key the cron writes on every successful run — not inferred from `DailyStat`'s freshness, since a day with zero real clicks across every link would look stale even on a cron run that worked correctly. Returns `503` when stale or never run, `200` when healthy — point an uptime checker at it.
+
 ## Getting Started
 
 ### Prerequisites
