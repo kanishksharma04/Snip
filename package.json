@@ -10,6 +10,7 @@
     "db:check": "tsx --env-file=.env.local scripts/db-check.ts",
     "db:seed": "tsx --env-file=.env.local prisma/seed.ts",
     "test": "vitest run",
+    "test:auth-status": "tsx --env-file=.env.local scripts/check-dashboard-auth-status.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

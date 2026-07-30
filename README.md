@@ -102,6 +102,7 @@ npm run db:seed          # ~100k synthetic clicks across 20 links over 90 days
 | `npm test` | Vitest unit tests |
 | `npm run db:check` | Verify the configured `DATABASE_URL` actually connects |
 | `npm run db:seed` | Seed ~100k synthetic `ClickEvent` rows (see [Step 31](#step-32--aggregation-baseline-before-dailystat-phase-6)) |
+| `npm run test:auth-status` | Regression check for a real bug this project shipped and fixed: a `loading.tsx` at a shared layout segment implicitly wraps its whole subtree in a Suspense boundary that pre-commits to a 200 status, silently breaking every `redirect()`/`notFound()` HTTP status below it. Spins up its own dev server on a dedicated port plus a throwaway user/session/link, asserts real status codes, and cleans up after itself — safe to run against any environment with DB access |
 
 ## Infrastructure
 
