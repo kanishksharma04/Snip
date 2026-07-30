@@ -12,6 +12,8 @@ A production-shaped URL shortener: cache-first redirects, real click analytics b
 - Public API (`/api/v1/*`) authenticated with hashed API keys, shown in plaintext exactly once
 - Rate limiting on redirects, link creation, and the API (`@upstash/ratelimit`, sliding window)
 - Anonymous demo on the landing page (rate-limited, 24h auto-expiring links, no account needed)
+- Security headers (CSP, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`) on every route
+- Structured JSON error logging (`src/instrumentation.ts`) with automatic URL redaction, plus a health-check endpoint that catches a silently-failed aggregation cron before `DailyStat` quietly goes stale
 - Dark mode
 
 ## Architecture
