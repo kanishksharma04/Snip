@@ -211,9 +211,10 @@ curl -X POST https://snip-blush.vercel.app/api/v1/links \
   -d '{"destination": "https://example.com/hello"}'
 # -> 201 {"id":"...","slug":"...","shortUrl":"https://snip-blush.vercel.app/...","destination":"https://example.com/hello","clickCount":0,"isActive":true,"expiresAt":null,"createdAt":"..."}
 
-# List your links
-curl https://snip-blush.vercel.app/api/v1/links \
+# List your links (paginated — defaults to page=1, limit=20, max limit=100)
+curl "https://snip-blush.vercel.app/api/v1/links?page=1&limit=20" \
   -H "Authorization: Bearer $SNIP_API_KEY"
+# -> 200 {"links":[...],"page":1,"limit":20,"total":42,"totalPages":3}
 
 # Stats for one link (last 30 days: clicks over time, referrers, devices, countries)
 curl https://snip-blush.vercel.app/api/v1/links/{id}/stats \

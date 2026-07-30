@@ -9,6 +9,21 @@ import { customSlugSchema, destinationSchema, getSnipBaseUrl } from "@/lib/valid
 export const runtime = "nodejs";
 
 const MAX_AUTO_SLUG_RETRIES = 3;
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
+
+// Same page/limit convention as the dashboard's own list (Step 30) — a
+// missing or malformed value falls back to the default rather than 400ing,
+// since this is a read endpoint where a bad query param is more useful
+// treated as "give me the defaults" than as a hard error.
+function parsePagination(url: URL): { page: number; limit: number } {
+  const page = Number(url.searchParams.get("page"));
+  const limit = Number(url.searchParams.get("limit"));
+  return {
+    page: Number.isInteger(page) && page > 0 ? page : 1,
+    limit: Number.isInteger(limit) && limit > 0 ? Math.min(limit, MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE,
+  };
+}
 
 function unauthorized() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -134,19 +149,32 @@ export async function GET(request: Request) {
   const rateLimitResponse = await checkApiRateLimit(auth.apiKeyId);
   if (rateLimitResponse) return rateLimitResponse;
 
-  const links = await db.link.findMany({
-    where: { userId: auth.userId },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      slug: true,
-      destination: true,
-      clickCount: true,
-      isActive: true,
-      expiresAt: true,
-      createdAt: true,
-    },
-  });
+  const { page, limit } = parsePagination(new URL(request.url));
 
-  return NextResponse.json({ links: links.map(toApiShape) });
+  const [links, total] = await Promise.all([
+    db.link.findMany({
+      where: { userId: auth.userId },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * limit,
+      take: limit,
+      select: {
+        id: true,
+        slug: true,
+        destination: true,
+        clickCount: true,
+        isActive: true,
+        expiresAt: true,
+        createdAt: true,
+      },
+    }),
+    db.link.count({ where: { userId: auth.userId } }),
+  ]);
+
+  return NextResponse.json({
+    links: links.map(toApiShape),
+    page,
+    limit,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
+  });
 }
