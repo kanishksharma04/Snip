@@ -31,6 +31,17 @@ function sortedByClicksDesc(merged: Record<string, number>): [string, number][] 
   return Object.entries(merged).sort((a, b) => b[1] - a[1]);
 }
 
+// The oldest day any link's DailyStat coverage reaches back to, globally —
+// every link gets aggregated by the same daily cron starting from the same
+// point, so this is one number, not a per-link query. DailyStat rows are
+// never deleted (only raw ClickEvent rows are, by retention), so this
+// naturally grows by a day every day the cron runs — it's not a fixed "30
+// days," just however far back real aggregated history currently extends.
+export async function getEarliestStatsDate(): Promise<Date | null> {
+  const result = await db.dailyStat.aggregate({ _min: { date: true } });
+  return result._min.date;
+}
+
 export type ClicksOverTimePoint = { date: string; clicks: number };
 
 // Returns only days that actually had at least one click — a sparse series.

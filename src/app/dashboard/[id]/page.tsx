@@ -8,8 +8,10 @@ import {
   getClicksOverTime,
   getCountryBreakdown,
   getDeviceBreakdown,
+  getEarliestStatsDate,
   getTopReferrers,
 } from "@/lib/stats";
+import { formatDateIst } from "@/lib/format";
 import { ActivityFeed, ActivityFeedSkeleton } from "@/components/features/activity-feed";
 import { ActiveToggle } from "@/components/features/active-toggle";
 import { CopyButton } from "@/components/features/copy-button";
@@ -85,6 +87,16 @@ export default async function LinkDetailPage({
 
   const shortUrl = `${getSnipBaseUrl()}/${link.slug}`;
 
+  // DailyStat rows are never deleted (only raw ClickEvent rows are, by
+  // retention), so this genuinely grows by a day every day the cron runs —
+  // it's not a permanent gap, just however far back real history currently
+  // reaches. Comparing it against the requested range is what tells a wider
+  // tab (e.g. 90d) apart from actually having 90 days of data to show.
+  const earliestAvailable = await getEarliestStatsDate();
+  const rangeStart = new Date();
+  rangeStart.setUTCDate(rangeStart.getUTCDate() - days);
+  const isPartialRange = earliestAvailable !== null && earliestAvailable > rangeStart;
+
   return (
     <div className="flex flex-col gap-6 p-6">
       <div className="flex flex-col gap-3">
@@ -111,6 +123,12 @@ export default async function LinkDetailPage({
           <h2 className="text-lg font-semibold">Clicks over time</h2>
           <RangeTabs linkId={link.id} activeDays={days} />
         </div>
+        {isPartialRange && earliestAvailable && (
+          <p className="text-muted-foreground mb-3 text-xs">
+            Showing available analytics history from {formatDateIst(earliestAvailable)}
+            {" — click data further back than that hasn't been aggregated (yet, or ever, if it's already aged out of retention)."}
+          </p>
+        )}
         <Suspense key={`clicks-${days}`} fallback={<ClicksChartSkeleton />}>
           <ClicksOverTimeSection linkId={link.id} days={days} />
         </Suspense>
