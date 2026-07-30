@@ -90,6 +90,7 @@ npm run db:seed          # ~100k synthetic clicks across 20 links over 90 days
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Redirects, caching, rate limiting | From an Upstash Redis database |
 | `IP_HASH_SALT` | Click tracking | `openssl rand -hex 32` — see [hashed IPs](#decisions-worth-defending) below |
 | `CRON_SECRET` | The aggregation cron | `openssl rand -base64 33` — must match what's configured wherever the cron is triggered from |
+| `AUTH_TRUST_HOST` | Testing a local production build | Only needed for `next build && next start` against `localhost` — real Vercel deployments auto-trust via Vercel's own `VERCEL` env var. Without it, every session lookup fails with an Auth.js `UntrustedHost` error |
 
 ### Useful scripts
 
