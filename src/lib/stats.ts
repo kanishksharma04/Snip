@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { db } from "@/lib/db";
 import { dateOnlyUTC } from "@/lib/aggregate";
 
@@ -13,8 +14,16 @@ function startOfRange(days: number): Date {
   return start;
 }
 
+// aggregateDay is the only writer of these columns, and it always writes a
+// plain string->number map — but that's an invariant this file is trusting,
+// not something Postgres/Prisma enforces on a `Json` column. Parsing on read
+// turns a future aggregation bug (or any other write into DailyStat) into a
+// loud, immediate error instead of a chart silently rendering NaN/garbage
+// counts with no indication anything is wrong.
+const countMapSchema = z.record(z.string(), z.number());
+
 function asCountMap(value: unknown): Record<string, number> {
-  return value as Record<string, number>;
+  return countMapSchema.parse(value);
 }
 
 function mergeCountMaps(maps: Record<string, number>[]): Record<string, number> {

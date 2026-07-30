@@ -94,6 +94,8 @@ npm run db:seed          # ~100k synthetic clicks across 20 links over 90 days
 | `CRON_SECRET` | The aggregation cron | `openssl rand -base64 33` — must match what's configured wherever the cron is triggered from |
 | `AUTH_TRUST_HOST` | Testing a local production build | Only needed for `next build && next start` against `localhost` — real Vercel deployments auto-trust via Vercel's own `VERCEL` env var. Without it, every session lookup fails with an Auth.js `UntrustedHost` error |
 
+`UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` point at a shared free-tier instance capped at 500k commands/month (see [Infrastructure](#infrastructure)). Usage is monitored via the Upstash console, not instrumented in-app — a self-tracked counter would need its own extra command on every operation it counts, which on the redirect path means doubling round trips on the one code path this whole project exists to keep fast, just to measure the quota that extra command itself eats into. Snip keeps its footprint low by design instead: one `GET` per warm redirect, one `SET` per cache miss, one `DEL` per mutation.
+
 ### Useful scripts
 
 | Command | What it does |
