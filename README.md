@@ -1,24 +1,26 @@
 # Snip
 
-A production-shaped URL shortener: cache-first redirects, real click analytics backed by daily pre-aggregation, a public API with hashed keys, rate limiting, and an anonymous no-login demo. Built on Next.js 16, Postgres (Prisma 7), and Redis.
+Snip is a URL shortener. You give it a long link, it gives you a short one, and it shows you who clicked it and when. It's built the way a real product would be — fast redirects, real analytics, a public API, rate limits, and basic security — not a weekend toy.
 
-## Features
+Built with Next.js 16, Postgres (via Prisma 7), and Redis.
 
-- Short link creation with auto-generated or custom slugs, optional expiry
-- Cache-first redirects (Redis, Postgres only on a cache miss) — see [Architecture](#architecture)
-- Non-blocking click tracking: user agent, geo, referrer, daily-rotating hashed IP
-- Dashboard with search, pagination, and per-link analytics (clicks over time, referrers, devices, countries), backed by a daily cron aggregation job instead of scanning raw events on every page load
-- Downloadable QR codes per link
-- Public API (`/api/v1/*`) authenticated with hashed API keys, shown in plaintext exactly once
-- Rate limiting on redirects, link creation, and the API (`@upstash/ratelimit`, sliding window)
-- Anonymous demo on the landing page (rate-limited, 24h auto-expiring links, no account needed)
-- Security headers (CSP, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`) on every route
-- Structured JSON error logging (`src/instrumentation.ts`) with automatic URL redaction, plus a health-check endpoint that catches a silently-failed aggregation cron before `DailyStat` quietly goes stale
+## What it does
+
+- Create short links with an auto-generated or custom slug, with an optional expiry date
+- Redirects are served from a cache first, so most visits never touch the database (see [How redirects work](#how-redirects-work))
+- Every click is recorded in the background — user agent, rough location, referrer, and a daily-rotating hashed IP (never the raw IP)
+- A dashboard with search, pagination, and per-link charts (clicks over time, referrers, devices, countries)
+- Downloadable QR codes for every link
+- A public API (`/api/v1/*`) authenticated with API keys — keys are hashed in storage and shown to you in full exactly once
+- Rate limits on redirects, link creation, and the API
+- A no-login demo on the landing page: shorten one link without an account (rate-limited, expires after 24 hours)
+- Security headers (CSP and friends) on every page
+- Structured error logs, with a health check that catches a broken background job before it fails silently
 - Dark mode
 
-## Architecture
+## How redirects work
 
-The redirect path is the one piece of this app that runs on every single visit to a short link, so it's built to touch Postgres as rarely as possible:
+The redirect is the one part of this app that runs on every single visit, so it's built to avoid the database as much as possible:
 
 ```mermaid
 sequenceDiagram
@@ -32,33 +34,33 @@ sequenceDiagram
     Browser->>Proxy: GET /:slug
     Proxy->>Proxy: rate limit check (100/min per IP)
     Proxy->>Redis: GET link:{slug}
-    alt cache hit
+    alt link is cached
         Redis-->>Proxy: cached result
-    else cache miss
+    else not cached yet
         Proxy->>Resolve: POST { slug }
-        Resolve->>Postgres: SELECT link by slug
-        Resolve->>Redis: SET link:{slug} (24h TTL, or 60s if not found)
+        Resolve->>Postgres: look up the link
+        Resolve->>Redis: cache it (24h, or 60s if it doesn't exist)
         Resolve-->>Proxy: result
     end
-    Proxy-->>Browser: 302 redirect
-    Proxy--)Track: waitUntil(POST click event) — fire-and-forget, after the response is already sent
-    Track->>Postgres: insert ClickEvent, increment Link.clickCount
+    Proxy-->>Browser: redirect
+    Proxy--)Track: record the click in the background
+    Track->>Postgres: save the click, bump the click count
 ```
 
-The redirect is built and returned to the browser before click tracking is even dispatched — `event.waitUntil()` fires the tracking POST after the response, so a slow or failing analytics write can never delay or break a visitor's redirect (verified in [Step 23](#step-23--proof-that-click-tracking-doesnt-block-the-redirect)). See [Decisions worth defending](#decisions-worth-defending) for why this stays a fetch to a separate Node route instead of a direct Postgres call, even though this Next.js/Vercel setup turned out not to run it on the edge runtime.
+In plain terms: a link that's already been visited recently is served straight from Redis, with no database query at all. A link nobody's visited in a while gets looked up once in Postgres, and that result is cached for next time. Either way, the visitor gets redirected immediately — recording the click happens *after* the redirect is already sent, so a slow or failed write to the database can never delay someone's redirect. We proved this with a real browser test: the network tab only ever shows the redirect itself, never the tracking request, because it happens entirely on the server.
 
-Analytics reads are a second, separate concern from the redirect path: a daily cron (`/api/cron/aggregate`) folds yesterday's `ClickEvent` rows into pre-summed `DailyStat` rows and prunes anything older than 30 days, so the dashboard reads ~30-90 pre-aggregated rows instead of re-scanning however many thousand raw events happened in the requested range (see [Step 35](#step-35--after-reading-from-dailystat-instead-of-raw-events)).
+Analytics are handled separately from the redirect path. Once a day, a background job takes yesterday's raw clicks and rolls them up into small daily summaries, then deletes raw click records older than 30 days. That's what keeps the dashboard fast even as click history grows — it reads a handful of summary rows instead of scanning every individual click.
 
-If that cron ever silently stops firing — quota, an outage, a bug — `DailyStat` just quietly stops growing with nothing to notice it. `GET /api/cron/aggregate/health` (same Bearer auth as the cron itself) reports whether it has run within the last 36 hours (one full extra cycle of slack past its daily schedule), reading a single Redis key the cron writes on every successful run — not inferred from `DailyStat`'s freshness, since a day with zero real clicks across every link would look stale even on a cron run that worked correctly. Returns `503` when stale or never run, `200` when healthy — point an uptime checker at it.
+If that daily job ever silently stops running — quota limit, an outage, a bug — nothing about the dashboard would tell you. So there's a small health check for it: `GET /api/cron/aggregate/health` reports whether the job has run in the last day and a half. It returns `200` if healthy and `503` if it hasn't run recently or has never run — point an uptime monitor at it.
 
-## Getting Started
+## Getting started
 
-### Prerequisites
+### You'll need
 
-- Node.js 20.19+
-- A Postgres database (this project uses [Neon](https://neon.tech))
-- A Redis instance with a REST API (this project uses [Upstash](https://upstash.com))
-- A GitHub OAuth App (github.com/settings/developers) for sign-in
+- Node.js 20.19 or newer
+- A Postgres database — this project uses [Neon](https://neon.tech)
+- A Redis database with a REST API — this project uses [Upstash](https://upstash.com)
+- A GitHub OAuth App (create one at github.com/settings/developers) for sign-in
 
 ### Setup
 
@@ -69,147 +71,66 @@ npm install
 cp .env.example .env.local
 ```
 
-Fill in `.env.local` — every variable it needs is listed there with a comment on where to get it (see [Environment variables](#environment-variables) below for the full reference). Then:
+Open `.env.local` and fill in the values — each one has a comment explaining where to get it (the table below has the full reference). Then:
 
 ```bash
-npx prisma migrate dev   # creates all tables in your database
+npx prisma migrate dev   # sets up your database tables
 npm run dev              # http://localhost:3000
 ```
 
-Optional, if you want non-trivial data to look at on the dashboard:
+If you want the dashboard to have real data to show instead of an empty screen:
 
 ```bash
-npm run db:seed          # ~100k synthetic clicks across 20 links over 90 days
+npm run db:seed          # adds ~100,000 fake clicks across 20 links
 ```
 
 ### Environment variables
 
-| Variable | Required for | Notes |
+| Variable | What it's for | Notes |
 |---|---|---|
-| `DATABASE_URL` | Everything | Pooled Postgres connection string |
-| `DIRECT_URL` | `prisma migrate` | Direct (non-pooled) connection string |
-| `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET` | Sign-in | From a GitHub OAuth App; local dev needs its own app with callback `http://localhost:3000/api/auth/callback/github` |
-| `AUTH_SECRET` | Sign-in | `openssl rand -base64 33` |
-| `SNIP_BASE_URL` | Link creation, QR codes, the public API's `shortUrl` field | Your deployed origin — also used to reject a destination that points back at Snip itself |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Redirects, caching, rate limiting | From an Upstash Redis database |
-| `IP_HASH_SALT` | Click tracking | `openssl rand -hex 32` — see [hashed IPs](#decisions-worth-defending) below |
-| `CRON_SECRET` | The aggregation cron | `openssl rand -base64 33` — must match what's configured wherever the cron is triggered from |
-| `AUTH_TRUST_HOST` | Testing a local production build | Only needed for `next build && next start` against `localhost` — real Vercel deployments auto-trust via Vercel's own `VERCEL` env var. Without it, every session lookup fails with an Auth.js `UntrustedHost` error |
+| `DATABASE_URL` | Everything | Your Postgres connection string (pooled) |
+| `DIRECT_URL` | Running migrations | A direct (non-pooled) connection string |
+| `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET` | Signing in | From a GitHub OAuth App. Local dev needs its own app, with its callback URL set to `http://localhost:3000/api/auth/callback/github` |
+| `AUTH_SECRET` | Signing in | Generate one with `openssl rand -base64 33` |
+| `SNIP_BASE_URL` | Building short links and QR codes | The domain this app is running on |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Redirects, caching, rate limits | From an Upstash Redis database |
+| `IP_HASH_SALT` | Hashing visitor IPs | Generate one with `openssl rand -hex 32` |
+| `CRON_SECRET` | Protecting the daily background job | Generate one with `openssl rand -base64 33` |
+| `AUTH_TRUST_HOST` | Only if testing a production build locally | Needed to run `next build && next start` on your own machine — real deployments on Vercel don't need this |
 
-`UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` point at a shared free-tier instance capped at 500k commands/month (see [Infrastructure](#infrastructure)). Usage is monitored via the Upstash console, not instrumented in-app — a self-tracked counter would need its own extra command on every operation it counts, which on the redirect path means doubling round trips on the one code path this whole project exists to keep fast, just to measure the quota that extra command itself eats into. Snip keeps its footprint low by design instead: one `GET` per warm redirect, one `SET` per cache miss, one `DEL` per mutation.
+A note on the Redis variables: this project uses a small, free Upstash plan capped at 500,000 commands a month. Usage is checked in the Upstash dashboard directly, rather than tracked inside the app — tracking it ourselves would mean an extra Redis command every time we wanted to count one, which adds load to the exact code path (redirects) this project is trying to keep fast. Instead, Snip is just careful by design: one read per cached redirect, one write when a link isn't cached yet, one delete when something changes.
 
-### Useful scripts
+### Useful commands
 
 | Command | What it does |
 |---|---|
 | `npm run dev` | Start the dev server |
-| `npm run build` / `npm start` | Production build and start |
-| `npm run lint` | ESLint |
-| `npm test` | Vitest unit tests |
-| `npm run db:check` | Verify the configured `DATABASE_URL` actually connects |
-| `npm run db:seed` | Seed ~100k synthetic `ClickEvent` rows (see [Step 31](#step-32--aggregation-baseline-before-dailystat-phase-6)) |
-| `npm run test:auth-status` | Regression check for a real bug this project shipped and fixed: a `loading.tsx` at a shared layout segment implicitly wraps its whole subtree in a Suspense boundary that pre-commits to a 200 status, silently breaking every `redirect()`/`notFound()` HTTP status below it. Spins up its own dev server on a dedicated port plus a throwaway user/session/link, asserts real status codes, and cleans up after itself — safe to run against any environment with DB access |
+| `npm run build` / `npm start` | Build and run a production build |
+| `npm run lint` | Run the linter |
+| `npm test` | Run the unit tests |
+| `npm run db:check` | Check that your database connection works |
+| `npm run db:seed` | Add ~100,000 fake clicks for testing the dashboard with real-feeling data |
+| `npm run test:auth-status` | Checks that signed-out users get properly redirected, and that a missing link returns a real 404. This guards against a real bug this project shipped and fixed: a loading state on one page was accidentally making *every* page under it return the wrong status code, even though it still looked correct on screen |
 
 ## Infrastructure
 
-- **Database:** Neon Postgres, region `iad1` (AWS `us-east-1`) — matches Vercel's default Node function region, since the redirect resolve endpoint runs on Vercel, not on the developer's machine. Provisioned via the Vercel Marketplace Neon integration.
-- **Cache:** Upstash Redis (`devtrack-redis`, AWS `us-east-1`) — an existing free-tier instance **shared with another, unrelated project**, not dedicated to Snip. Every key this app writes is namespaced under the `link:` prefix and nothing else. `FLUSHDB`/`FLUSHALL`/wildcard deletes and `SCAN`/`KEYS` enumeration are never used anywhere in this codebase — deletes always target one exact known key. Free tier caps at 500k commands/month; Step 31's 100k-row seed writes to Postgres only and never touches Redis.
-- **Error observability:** no Sentry (or similar) account is configured for this project. `src/instrumentation.ts` uses Next's own built-in `onRequestError` hook instead — every unhandled server-side error (route handlers, Server Component render, Server Actions, `proxy.ts`) is logged as one stable-shape JSON object per line (`timestamp`, `level`, `route`, `digest`, `message`, `stack`), which Vercel's existing log aggregation already captures and can be filtered/searched on. `message`/`stack` are run through `redactUrls()` (`src/lib/log-redaction.ts`) first, which strips the query string and hash off any URL either happens to contain — most notably a link's destination, which can carry tokens or PII in its query string; same reasoning as the hashed IPs (don't retain what isn't needed). If real Sentry is ever added, `@sentry/nextjs` registers itself through this exact same `onRequestError` hook — wire it up **alongside** this one (both can call through), not as a replacement for it.
+- **Database:** Neon Postgres, hosted in AWS's `us-east-1` region — the same region the app runs in on Vercel, so the two aren't talking to each other across the world on every request.
+- **Cache:** Upstash Redis. This particular database is shared with another, unrelated project, so Snip is careful about it: every key it writes starts with `link:` and nothing else, and nothing in this codebase ever wipes the whole database or scans through all its keys — deletes always target one exact key.
+- **Error tracking:** there's no Sentry (or similar) account set up for this project. Instead, `src/instrumentation.ts` uses a built-in Next.js hook to catch every unhandled server error and log it as a single line of structured JSON that Vercel's own logs already capture and let you search. Before anything is logged, URLs inside the error message are stripped down to just their domain and path — a link's destination can carry things like password-reset tokens in its query string, and those should never end up sitting in a log. If real Sentry gets added later, it plugs into this exact same hook — it should run alongside this logging, not replace it.
 
-## Performance log
+## How it performs
 
-### Step 14 — naive redirect (Postgres on every request)
+**Redirect speed.** A cold redirect (checking Postgres every time) took a median of about 480ms in production. Adding a Redis cache in front of it brought that down to about 407ms — a real improvement, but a smaller one than "caching" usually promises. The reason: this redirect runs as a small serverless function on Vercel, not as an edge function, so every request pays for spinning that function up regardless of how fast the cache read is. The cache still removes a database query from the common case, which matters — it just isn't the whole story on this hosting setup.
 
-Measured against production (`https://snip-blush.vercel.app/perfbaseline1`), 10 sequential `curl` requests, `time_total` per request, from the machine this project is developed on.
+**Click tracking doesn't slow anything down.** We proved this with a real browser test, not just by reading the code: the browser's network tab shows only the redirect itself — never the request that records the click — because that request is fired from the server after the redirect has already been sent. Server logs confirm the redirect finished a full 1.7 seconds before the click was actually saved, with no effect on the visitor. See [`docs/redirect-waterfall.png`](docs/redirect-waterfall.png) for the actual capture.
 
-| # | ms |
-|---|---|
-| 1 | 1664.3 |
-| 2 | 678.9 |
-| 3 | 505.9 |
-| 4 | 749.5 |
-| 5 | 410.5 |
-| 6 | 400.5 |
-| 7 | 470.9 |
-| 8 | 466.7 |
-| 9 | 485.9 |
-| 10 | 473.2 |
+**Why the dashboard stays fast as click history grows.** We seeded a test database with about 100,000 real click records spread across 90 days, then measured the dashboard's queries directly against Postgres (raw output: [`docs/explain-analyze-before.txt`](docs/explain-analyze-before.txt)). Reading a single day's totals stayed fast even at that size. But the "top referrers / devices / countries" breakdowns got noticeably slower as the date range widened — up to about 22ms in the worst case here, and climbing further as more clicks pile up over time, because each one has to group every raw click row in the requested range. The fix: instead of grouping raw clicks every time someone loads the dashboard, a daily background job pre-computes each day's totals once and stores the summary. After that change, the same queries dropped to under 1ms — reading roughly 30 small summary rows instead of scanning tens of thousands of individual clicks. We double-checked that the totals matched exactly between the old and new methods before trusting the faster numbers.
 
-**Median: 479.6 ms** · **p95: 1664.3 ms** (nearest-rank over 10 samples — with this few samples p95 is coarse and effectively tracks the slowest observed request, a likely cold start).
-
-### Step 19 — cache-first redirect (Redis, Postgres only on a miss)
-
-Same method, same machine, one warm-up request first (excluded) to populate the cache, then 10 measured requests against `https://snip-blush.vercel.app/perfcached01`.
-
-| # | ms |
-|---|---|
-| 1 | 727.0 |
-| 2 | 686.4 |
-| 3 | 379.1 |
-| 4 | 655.1 |
-| 5 | 366.7 |
-| 6 | 434.2 |
-| 7 | 445.4 |
-| 8 | 366.2 |
-| 9 | 373.5 |
-| 10 | 356.3 |
-
-**Median: 406.6 ms** · **p95: 727.0 ms**.
-
-**Where the time went:** the median improved (~480ms → ~407ms, roughly 15%) from removing Postgres from the warm path, but the win is smaller than the "edge cache" framing suggests, for a reason Step 13 already surfaced: this redirect runs as a Node.js Lambda, not an edge function, on this Next.js/Vercel setup — so every request still pays a Lambda invocation (cold or warm) regardless of what backs the cache. Reading `link:{slug}` from Upstash also isn't free: it's still an HTTPS round trip (Upstash's REST API) to a separate service, just a cheaper one than a Postgres query with connection setup and query planning. The three slowest samples (655–727ms) look like Lambda cold starts or fresh outbound connections to Upstash rather than anything cache-related — the fast samples (356–379ms) are closer to what a genuinely warm Lambda + warm cache costs. The architecture is still the right one to have built (Step 17's zero-database-queries proof holds regardless), but on this stack the ceiling on redirect latency is set by serverless invocation overhead, not by which datastore serves the read.
-
-### Step 23 — proof that click tracking doesn't block the redirect
-
-See [`docs/redirect-waterfall.png`](docs/redirect-waterfall.png). Real Playwright network capture plus real dev-server log timestamps (no invented numbers): the browser's Network tab shows only two requests — the redirect itself and the follow-through to the destination — because `/api/internal/track` is dispatched server-side via `event.waitUntil()` and never touches the client at all. Server-side timestamps confirm the ordering directly: the redirect response was constructed and returned **1737ms** before the tracking write (ClickEvent insert + clickCount increment) finished.
-
-### Step 32 — aggregation baseline, before `DailyStat` (Phase 6)
-
-Step 31 seeded 103,379 real `ClickEvent` rows across 20 links over 90 days. This measures the four queries `src/lib/stats.ts` runs today, directly via `EXPLAIN ANALYZE` against the most-clicked seeded link (28,737 of its own rows). Full raw output: [`docs/explain-analyze-before.txt`](docs/explain-analyze-before.txt).
-
-| Query | 7d | 30d | 90d |
-|---|---|---|---|
-| `getClicksOverTime` (raw row scan) | 0.43 ms | 1.51 ms | 4.22 ms |
-| `getTopReferrers` (`GROUP BY referrer`) | 4.46 ms | 17.12 ms | 21.67 ms |
-| `getDeviceBreakdown` (`GROUP BY device`) | 4.65 ms | 18.10 ms | 21.53 ms |
-| `getCountryBreakdown` (`GROUP BY country`) | 4.86 ms | 16.91 ms | 20.77 ms |
-
-**The row-scan query stays fast** — `getClicksOverTime` only filters on `(linkId, createdAt)`, which is exactly the composite index already covers, so Postgres answers it with an `Index Only Scan` (zero/near-zero heap fetches) and it scales gently with rows returned (2,464 → 9,860 → 28,737).
-
-**The three `GROUP BY` queries degrade for a real, specific reason, not a vague "aggregation is slow":** the planner does *not* use the `(linkId, createdAt)` composite index for these. It picks the single-column `createdAt` index instead — reading every link's events in the day range, then filtering out the ones that aren't this link (`Rows Removed by Filter: 6473` at 7d, rising to `25830` at 30d), because grouping by `referrer`/`device`/`country` gets no benefit from the composite index's column order once it's scanning for a `COUNT(*)`. At 90 days the day-range filter stops being selective at all (it covers most of the table) and Postgres abandons the index entirely for a flat `Seq Scan` reading all 103,379 rows. That's the actual "before" problem Steps 33–35 fix: not that 100k rows is inherently slow for Postgres (it isn't — sub-25ms even in the worst case here), but that **every dashboard visit re-scans and re-groups raw events from scratch**, and that cost only grows as more clicks accumulate — pre-aggregating into `DailyStat` turns a 90-day chart into ~90 pre-summed rows instead of a scan over however many thousand raw events happened in that window.
-
-### Step 35 — after: reading from `DailyStat` instead of raw events
-
-Step 34's real authenticated cron call (used to verify the endpoint, per that step's own DONE WHEN) genuinely aggregated one real day and then applied real 30-day retention against the seeded data — deleting `ClickEvent` rows older than 30 days, exactly as designed. That means this project's actual retained history is now ~30 days, not 90, so the "after" comparison below is scoped honestly to a 30-day range (the widest window with real data on both sides of the comparison) rather than restating a 90-day claim the data can no longer support. The remaining ~30 days of `DailyStat` were backfilled via the same real `aggregateDay()` function the cron calls, simulating the daily cron having run all along — a one-time bootstrap, not a new code path.
-
-Same method as Step 32 (`EXPLAIN ANALYZE`, server-side execution time — application-level wall-clock timing was tried first but was dominated by Neon connection/network round-trip variance between runs, the same effect Step 19 already found, so it wasn't a reliable signal here), same link, same 30-day window, same underlying data — only the query shape changes:
-
-| Query | Before (raw `ClickEvent` scan) | After (`DailyStat` + today's live events) |
-|---|---|---|
-| Clicks over time | 1.43 ms, 9,856 rows read | 0.08 ms, 30 rows read |
-| Top referrers | 7.67 ms, full-table scan (35,680 rows), 25,824 filtered out | 0.73 ms, today-only scan (~1,400 rows) |
-
-Clicks-over-time went from an `Index Only Scan` reading every raw event in range to a `Bitmap Index Scan` on `DailyStat`'s `(linkId, date)` unique index reading exactly the 30 day-rows requested — an ~18x drop in execution time driven directly by reading 30 rows instead of 9,856. The referrer breakdown (representative of the device/country breakdowns, which share the same shape) no longer touches historical `ClickEvent` rows at all — the `GROUP BY` now only runs over *today's* live events, with every prior day already pre-summed into one small JSON blob per `DailyStat` row — cutting it from a 35,680-row `Seq Scan` to a ~1,400-row indexed scan, a ~10.5x improvement. Correctness was verified before trusting either number: total clicks and every referrer/device/country count matched exactly between the raw-scan and `DailyStat`-backed paths for the same window.
-
-### Step 40 — Lighthouse audit of `/dashboard`
-
-Real Lighthouse run against a production build (`next build && next start`), authenticated, headless Chrome:
-
-| Category | Score |
-|---|---|
-| Performance | 89 |
-| Accessibility | 98 |
-| Best Practices | 100 |
-| SEO | 100 |
-
-Performance's sub-metrics: First Contentful Paint 98/100 (1.3s), Speed Index 99/100 (2.2s), Total Blocking Time 100/100 (30ms), Cumulative Layout Shift 100/100 (0) — all genuinely excellent. The only weak sub-metric is Largest Contentful Paint, 58/100 (3.7s), which is the sole reason the category lands at 89 instead of ≥90.
-
-That LCP number is contaminated, not a real slow paint — traced via raw CDP network capture (`Network.requestWillBeSentExtraInfo`), not guessed: roughly 2 seconds after a correctly authenticated load, Next.js's client router fires its own background "metadata-only" prefetch revalidation of the current route (identifiable by a `next-router-state-tree` header ending in `"metadata-only"`). That request carries the real, valid session cookie — confirmed directly at the network layer — yet still triggers a client-side navigation attempt to `/login?callbackUrl=/dashboard`, which extends the trace window Lighthouse uses to determine "largest paint." Every *real* navigation (`curl` with the session cookie, a fresh page load, a hard refresh) authenticates and renders correctly, consistently, every time — this only happens on Next's own internal revalidation fetch, never on an actual page view.
-
-**Not fixed, by deliberate choice:** the underlying cause is this Next.js version's router-prefetch internals colliding with a page-level `redirect()`-based auth check, not application logic in Snip. Multiple mitigations were tried — priming an authenticated session via cookie injection, blocking the specific prefetch request at the network layer, disabling Lighthouse's storage reset, driving the audit through Lighthouse's Node API with a raw CDP session — none produced a clean trace without either reintroducing the artifact or losing confidence that the number reflected the real page rather than a different workaround artifact. A real fix would mean restructuring how every protected route checks auth (moving it out of page-level `redirect()` and into a middleware-level guard) — a genuine architecture change, and a riskier one to make at the very last step of a 40-step build than to document honestly and leave for deliberate, dedicated follow-up.
+**A real Lighthouse audit of the dashboard** scored 89 on Performance, 98 on Accessibility, and 100 on both Best Practices and SEO. Three of the four performance sub-scores were excellent (98–100); the one that pulled the overall score under 90 was "Largest Contentful Paint," and we tracked down exactly why: a couple of seconds after the page loads, Next.js's own background prefetching briefly (and incorrectly) treats the page as signed-out, which confuses Lighthouse's measurement — not a real slow paint. Every real page load, refresh, and direct visit works correctly and quickly; this only happens on Next.js's internal background revalidation, never on an actual page view. Properly fixing it would mean changing how every protected page in this app checks who's signed in — a bigger, riskier change than was worth making at the very end of this project, so it's written up honestly here instead of hidden or quietly worked around.
 
 ## Public API
 
-Generate a key at `/dashboard/settings` — it's shown in full exactly once; Snip only ever stores its SHA-256 hash afterward. Every request below is Bearer-authenticated and rate-limited to 1000 requests/day per key.
+Create a key from `/dashboard/settings` — it's shown to you in full exactly once; after that, only its hash is stored. Every request below needs that key in an `Authorization: Bearer` header, and is limited to 1,000 requests per day.
 
 ```bash
 # Create a link
@@ -219,53 +140,51 @@ curl -X POST https://snip-blush.vercel.app/api/v1/links \
   -d '{"destination": "https://example.com/hello"}'
 # -> 201 {"id":"...","slug":"...","shortUrl":"https://snip-blush.vercel.app/...","destination":"https://example.com/hello","clickCount":0,"isActive":true,"expiresAt":null,"createdAt":"..."}
 
-# List your links (paginated — defaults to page=1, limit=20, max limit=100)
+# List your links (page=1, limit=20 by default; limit can't go above 100)
 curl "https://snip-blush.vercel.app/api/v1/links?page=1&limit=20" \
   -H "Authorization: Bearer $SNIP_API_KEY"
 # -> 200 {"links":[...],"page":1,"limit":20,"total":42,"totalPages":3}
 
-# Stats for one link (last 30 days: clicks over time, referrers, devices, countries)
+# Get stats for one link (last 30 days)
 curl https://snip-blush.vercel.app/api/v1/links/{id}/stats \
   -H "Authorization: Bearer $SNIP_API_KEY"
 ```
 
-A missing/invalid/revoked key returns `401`; exceeding the daily limit returns `429` with a `Retry-After` header. This was run for real against a locally generated key before being written here — see this repo's history for the verification, not just the claim.
+A missing, wrong, or revoked key gets a `401`. Going over the daily limit gets a `429` with a `Retry-After` header telling you when to try again. These examples were all run for real against a real generated key before being written down here.
 
-## Decisions worth defending
+## Why some things are built this way
 
-**302, not 301, for the redirect.** A 301 tells the browser (and any CDN in between) that the mapping is permanent, so it gets cached and every future visit skips this server entirely — the click counter silently stops incrementing, and a link can never be repointed or disabled again. A 302 is re-checked on every visit, which is the whole point of a link shortener with analytics: `Cache-Control: no-store` is set explicitly on top of that so nothing caches it anyway.
+**Redirects use a 302, not a 301.** A 301 tells the browser "this is permanent, remember it" — so browsers and CDNs cache it and stop asking Snip at all. That would silently break click counting and make disabling or repointing a link impossible. A 302 gets checked every time, which is the whole point of a link shortener that also tracks clicks.
 
-**Cache-first redirects, even though this isn't actually running on the edge.** Step 13 originally justified `proxy.ts` reading Redis directly (instead of querying Postgres inline) as an edge-runtime constraint. A real `vercel inspect` on a deployed build later showed this Next.js/Vercel combination runs the proxy as a plain Node.js Lambda (`nodejs24.x`, `edge: null`) — the technical reason no longer holds. The architecture was kept anyway (a deliberate, documented call, not an oversight): cache-first is still the right shape for a redirect hot path regardless of runtime, and Step 17 already proved warm slugs resolve with zero Postgres queries. What that finding does change is the *latency* story — Step 19's measurement shows the win from caching is real but smaller than "edge cache" framing implies, because every request still pays a Lambda invocation regardless of what backs the cache.
+**Redirects still go through a cache-first design, even though it turned out not to run at the "edge."** This project originally set it up that way assuming it would run on Vercel's edge network. A real check on a deployed build showed it actually runs as a regular server function instead — the original assumption was wrong. The caching design was kept anyway, on purpose: it's still the right shape for a redirect that needs to be fast, and it still means a warm link never touches the database. What that assumption *does* change is how much of a speed win to expect — see [How it performs](#how-it-performs) above.
 
-**Raw events, then daily aggregates — not aggregates from day one.** `ClickEvent` rows are still written on every click and read directly for anything happening *today* (see [Architecture](#architecture)); only history before today gets folded into `DailyStat`. Aggregating from day one would mean designing the aggregation shape before there was real data or real query patterns to design it around — Phase 6 (Steps 31–35) exists specifically to measure the raw-scan cost first ([Step 32](#step-32--aggregation-baseline-before-dailystat-phase-6)), so the case for pre-aggregation is a measured ~10-18x, not an assumed one ([Step 35](#step-35--after-reading-from-dailystat-instead-of-raw-events)).
+**Clicks are tracked as individual raw records, then rolled up into daily summaries — not summarized from the very start.** Building the summarized version first would have meant guessing at the right shape before there was real data or real usage patterns to design around. Instead, this project measured the actual cost of the slow, naive approach first, then fixed it once the numbers showed where it hurt (see [How it performs](#how-it-performs)).
 
-**Hashed IPs with a rotating salt, not raw IPs.** The raw visitor IP is never stored anywhere. `hashIp()` runs `SHA-256(ip + IP_HASH_SALT + today's UTC date)`, truncated to 16 hex chars — the date component means the same visitor hashes to a *different* value tomorrow, so nothing here can link a visitor's activity across days, only count unique visitors *within* a day (which is all the dashboard needs `uniqueVisitors` for). This is a one-way function with no realistic reversal path, unlike storing the IP itself or a stable (non-rotating) hash of it.
+**Visitor IPs are hashed with a salt that changes every day, never stored raw.** The hash combines the IP, a secret value, and today's date — so the same visitor produces a *different* hash tomorrow. That's enough to count "how many different people clicked this today" without keeping anything that could identify or track a specific person across days.
 
 ## Deployment
 
-**Live URL:** https://snip-blush.vercel.app
+**Live at:** https://snip-blush.vercel.app
 
-Deployed on Vercel, connected to the same Neon Postgres project used in development (region `iad1` / AWS `us-east-1` — see [Infrastructure](#infrastructure); this is also the baseline for the redirect-latency numbers in Step 14/19).
+Deployed on Vercel, using the same Neon Postgres project as development.
 
-### Required environment variables
+### Environment variables in production
 
-| Variable | Scope | Notes |
-|---|---|---|
-| `DATABASE_URL` | Production, Preview, Development | Pooled Neon connection (hostname contains `-pooler`) |
-| `DIRECT_URL` | Production, Preview | Direct Neon connection, used by Prisma Migrate. Sourced from Vercel's own `DATABASE_URL_UNPOOLED` so it stays correct if the Marketplace integration rotates credentials again. Not set on Development — Vercel's CLI rejects sensitive values on that scope, and local dev already reads `.env.local` directly |
-| `AUTH_SECRET` | Production | Independent from the value in `.env.local` — dev and prod intentionally use different session secrets |
-| `AUTH_GITHUB_ID` | Production | Client ID of a **separate** production GitHub OAuth App (dev keeps its own app with a `localhost` callback) |
-| `AUTH_GITHUB_SECRET` | Production | Secret for the same production GitHub OAuth App |
-| `SNIP_BASE_URL` | Production | `https://snip-blush.vercel.app` — used to build every short URL and QR code, and to reject a destination pointing back at Snip itself |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Production | Independent from the values in `.env.local` — dev and prod point at the same shared Upstash instance here, but see [Infrastructure](#infrastructure) for the constraints that come with that |
-| `IP_HASH_SALT` | Production | Independent from `.env.local`'s value — dev and prod should never share this, or a hash computed in one environment would be reversible by testing candidate IPs in the other |
-| `CRON_SECRET` | Production | Must match what Vercel Cron sends as `Authorization: Bearer $CRON_SECRET` when it calls `/api/cron/aggregate` on the schedule in `vercel.json` |
+| Variable | Notes |
+|---|---|
+| `DATABASE_URL` / `DIRECT_URL` | Same Postgres project as development |
+| `AUTH_SECRET` | A different value from local dev — the two should never share a session secret |
+| `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET` | From a **separate** GitHub OAuth App than local dev uses, since the callback URL is different |
+| `SNIP_BASE_URL` | `https://snip-blush.vercel.app` |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Same shared Redis instance as development in this project's case |
+| `IP_HASH_SALT` | A different value from local dev — sharing it would make IPs guessable across environments |
+| `CRON_SECRET` | Must match what's configured for the scheduled job in `vercel.json` |
 
 ### Production GitHub OAuth App
 
 - Homepage URL: `https://snip-blush.vercel.app`
-- Authorization callback URL: `https://snip-blush.vercel.app/api/auth/callback/github`
+- Callback URL: `https://snip-blush.vercel.app/api/auth/callback/github`
 
-### Preview deployments
+### A note on preview deployments
 
-Every preview deployment gets a unique `*.vercel.app` URL that can't match a fixed OAuth callback, so GitHub sign-in only works on the production domain above. This is expected, not a bug to fix.
+Every preview deployment gets its own random URL, which can't be registered as a GitHub OAuth callback ahead of time. So signing in with GitHub only works on the production domain above — previews are expected to not support sign-in, that's not a bug.
