@@ -41,15 +41,18 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <header className="flex items-center justify-between border-b px-6 py-4">
-        <Link href="/dashboard" className="text-lg font-semibold">
+      <header className="bg-background/80 sticky top-0 z-10 flex items-center justify-between border-b px-6 py-4 backdrop-blur-md">
+        <Link
+          href="/dashboard"
+          className="text-lg font-semibold tracking-tight transition-opacity hover:opacity-70"
+        >
           Snip
         </Link>
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <DropdownMenu>
-            <DropdownMenuTrigger className="rounded-full">
-              <Avatar>
+            <DropdownMenuTrigger className="rounded-full ring-offset-background transition-shadow focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">
+              <Avatar className="ring-border/80 ring-1 transition-shadow hover:ring-primary/40">
                 <AvatarImage src={user.image ?? undefined} alt={user.name ?? "User"} />
                 <AvatarFallback>{initials}</AvatarFallback>
               </Avatar>

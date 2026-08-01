@@ -113,7 +113,7 @@ export function CreateLinkForm() {
           )}
         />
 
-        <Button type="submit" disabled={isPending}>
+        <Button type="submit" disabled={isPending} className="w-full">
           {isPending ? "Creating…" : "Create link"}
         </Button>
       </form>

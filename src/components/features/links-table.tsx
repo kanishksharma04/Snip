@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { IconLink } from "@tabler/icons-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,8 +51,11 @@ export function LinksTable({
 }) {
   if (links.length === 0) {
     return (
-      <Card>
+      <Card className="animate-in fade-in duration-500">
         <CardHeader>
+          <div className="bg-primary/10 text-primary mb-1 flex size-9 items-center justify-center rounded-lg">
+            <IconLink className="size-4.5" />
+          </div>
           <CardTitle>{isFiltered ? "No matching links" : "No links yet"}</CardTitle>
         </CardHeader>
         <CardContent>
@@ -61,7 +65,10 @@ export function LinksTable({
             ) : (
               <>
                 You haven&apos;t created any links yet.{" "}
-                <Link href="/dashboard/new" className="text-primary underline">
+                <Link
+                  href="/dashboard/new"
+                  className="text-primary underline underline-offset-2 hover:no-underline"
+                >
                   Create your first link
                 </Link>
                 .
@@ -76,56 +83,72 @@ export function LinksTable({
   const baseUrl = getSnipBaseUrl();
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Slug</TableHead>
-          <TableHead>Destination</TableHead>
-          <TableHead>Clicks</TableHead>
-          <TableHead>Created</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead className="w-10" />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {links.map((link) => {
-          const shortUrl = `${baseUrl}/${link.slug}`;
-          const isExpired = link.expiresAt !== null && isPast(link.expiresAt);
+    <div className="animate-in fade-in overflow-hidden rounded-xl border duration-500">
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead>Slug</TableHead>
+            <TableHead>Destination</TableHead>
+            <TableHead>Clicks</TableHead>
+            <TableHead>Created</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="w-10" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {links.map((link) => {
+            const shortUrl = `${baseUrl}/${link.slug}`;
+            const isExpired = link.expiresAt !== null && isPast(link.expiresAt);
 
-          return (
-            <TableRow key={link.id}>
-              <TableCell className="font-medium">{link.slug}</TableCell>
-              <TableCell
-                className="max-w-xs truncate"
-                title={link.destination}
-              >
-                {link.destination}
-              </TableCell>
-              <TableCell>{link.clickCount}</TableCell>
-              <TableCell>{formatDateIst(link.createdAt)}</TableCell>
-              <TableCell>
-                <div className="flex gap-1">
-                  {isExpired && <Badge variant="destructive">Expired</Badge>}
-                  {!link.isActive && <Badge variant="secondary">Disabled</Badge>}
-                  {!isExpired && link.isActive && <Badge variant="outline">Active</Badge>}
-                </div>
-              </TableCell>
-              <TableCell>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon-sm" aria-label="Link actions">
-                      <IconDots className="size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <CopyShortUrlMenuItem shortUrl={shortUrl} />
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+            return (
+              <TableRow key={link.id} className="group">
+                <TableCell className="font-medium">
+                  <Link
+                    href={`/dashboard/${link.id}`}
+                    className="hover:text-primary transition-colors"
+                  >
+                    {link.slug}
+                  </Link>
+                </TableCell>
+                <TableCell
+                  className="text-muted-foreground max-w-xs truncate"
+                  title={link.destination}
+                >
+                  {link.destination}
+                </TableCell>
+                <TableCell className="font-medium">{link.clickCount}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {formatDateIst(link.createdAt)}
+                </TableCell>
+                <TableCell>
+                  <div className="flex gap-1">
+                    {isExpired && <Badge variant="destructive">Expired</Badge>}
+                    {!link.isActive && <Badge variant="secondary">Disabled</Badge>}
+                    {!isExpired && link.isActive && <Badge variant="outline">Active</Badge>}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Link actions"
+                        className="opacity-60 transition-opacity group-hover:opacity-100"
+                      >
+                        <IconDots className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <CopyShortUrlMenuItem shortUrl={shortUrl} />
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
   );
 }

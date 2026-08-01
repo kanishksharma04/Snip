@@ -98,10 +98,10 @@ export default async function LinkDetailPage({
   const isPartialRange = earliestAvailable !== null && earliestAvailable > rangeStart;
 
   return (
-    <div className="flex flex-col gap-6 p-6">
-      <div className="flex flex-col gap-3">
+    <div className="animate-in fade-in slide-in-from-bottom-2 flex flex-col gap-6 p-6 duration-500">
+      <div className="flex flex-col gap-3 rounded-2xl border p-5 shadow-sm sm:p-6">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold">{link.slug}</h1>
+          <h1 className="text-xl font-semibold tracking-tight">{link.slug}</h1>
           <ActiveToggle linkId={link.id} isActive={link.isActive} />
         </div>
         <p className="text-muted-foreground max-w-xl truncate" title={link.destination}>
@@ -118,9 +118,9 @@ export default async function LinkDetailPage({
         <QrCode linkId={link.id} slug={link.slug} />
       </div>
 
-      <div>
+      <div className="rounded-2xl border p-5 shadow-sm sm:p-6">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Clicks over time</h2>
+          <h2 className="text-lg font-semibold tracking-tight">Clicks over time</h2>
           <RangeTabs linkId={link.id} activeDays={days} />
         </div>
         {isPartialRange && earliestAvailable && (
@@ -135,28 +135,28 @@ export default async function LinkDetailPage({
       </div>
 
       <div className="grid gap-6 md:grid-cols-3">
-        <div>
-          <h2 className="mb-3 text-lg font-semibold">Top referrers</h2>
+        <div className="rounded-2xl border p-5 shadow-sm sm:p-6">
+          <h2 className="mb-3 text-lg font-semibold tracking-tight">Top referrers</h2>
           <Suspense key={`referrers-${days}`} fallback={<ReferrerTableSkeleton />}>
             <ReferrersSection linkId={link.id} days={days} />
           </Suspense>
         </div>
-        <div>
-          <h2 className="mb-3 text-lg font-semibold">Devices</h2>
+        <div className="rounded-2xl border p-5 shadow-sm sm:p-6">
+          <h2 className="mb-3 text-lg font-semibold tracking-tight">Devices</h2>
           <Suspense key={`devices-${days}`} fallback={<DevicePieChartSkeleton />}>
             <DevicesSection linkId={link.id} days={days} />
           </Suspense>
         </div>
-        <div>
-          <h2 className="mb-3 text-lg font-semibold">Countries</h2>
+        <div className="rounded-2xl border p-5 shadow-sm sm:p-6">
+          <h2 className="mb-3 text-lg font-semibold tracking-tight">Countries</h2>
           <Suspense key={`countries-${days}`} fallback={<CountryListSkeleton />}>
             <CountriesSection linkId={link.id} days={days} />
           </Suspense>
         </div>
       </div>
 
-      <div>
-        <h2 className="mb-3 text-lg font-semibold">Recent activity</h2>
+      <div className="rounded-2xl border p-5 shadow-sm sm:p-6">
+        <h2 className="mb-3 text-lg font-semibold tracking-tight">Recent activity</h2>
         <Suspense fallback={<ActivityFeedSkeleton />}>
           <ActivitySection linkId={link.id} />
         </Suspense>

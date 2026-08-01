@@ -6,6 +6,7 @@ import { createApiKey, revokeApiKey } from "@/lib/actions/api-keys";
 import { formatDateIst } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -84,8 +85,8 @@ export function ApiKeyManager({ initialKeys }: { initialKeys: ApiKeyRow[] }) {
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex max-w-md items-end gap-2">
+    <div className="flex flex-col gap-6">
+      <div className="flex max-w-md items-end gap-2 rounded-2xl border p-5 shadow-sm sm:p-6">
         <div className="flex flex-1 flex-col gap-1.5">
           <label htmlFor="api-key-name" className="text-sm font-medium">
             Key name
@@ -105,41 +106,56 @@ export function ApiKeyManager({ initialKeys }: { initialKeys: ApiKeyRow[] }) {
       {keys.length === 0 ? (
         <p className="text-muted-foreground text-sm">No API keys yet.</p>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Key</TableHead>
-              <TableHead>Created</TableHead>
-              <TableHead>Last used</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="w-10" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {keys.map((key) => (
-              <TableRow key={key.id}>
-                <TableCell className="font-medium">{key.name}</TableCell>
-                <TableCell className="font-mono text-sm">{key.keyPrefix}…</TableCell>
-                <TableCell>{formatDateIst(key.createdAt)}</TableCell>
-                <TableCell>{key.lastUsedAt ? formatDateIst(key.lastUsedAt) : "Never"}</TableCell>
-                <TableCell>{key.revokedAt ? "Revoked" : "Active"}</TableCell>
-                <TableCell>
-                  {!key.revokedAt && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={isPending}
-                      onClick={() => handleRevoke(key.id)}
-                    >
-                      Revoke
-                    </Button>
-                  )}
-                </TableCell>
+        <div className="overflow-hidden rounded-xl border">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Name</TableHead>
+                <TableHead>Key</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead>Last used</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="w-10" />
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {keys.map((key) => (
+                <TableRow key={key.id} className="group">
+                  <TableCell className="font-medium">{key.name}</TableCell>
+                  <TableCell className="text-muted-foreground font-mono text-sm">
+                    {key.keyPrefix}…
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDateIst(key.createdAt)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {key.lastUsedAt ? formatDateIst(key.lastUsedAt) : "Never"}
+                  </TableCell>
+                  <TableCell>
+                    {key.revokedAt ? (
+                      <Badge variant="secondary">Revoked</Badge>
+                    ) : (
+                      <Badge variant="outline">Active</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {!key.revokedAt && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={isPending}
+                        onClick={() => handleRevoke(key.id)}
+                        className="opacity-60 transition-opacity group-hover:opacity-100"
+                      >
+                        Revoke
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       )}
 
       <Dialog open={revealedKey !== null} onOpenChange={(open) => !open && setRevealedKey(null)}>

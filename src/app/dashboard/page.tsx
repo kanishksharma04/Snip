@@ -1,10 +1,13 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { db } from "@/lib/db";
 import { LinksTable, LinksTableSkeleton } from "@/components/features/links-table";
 import { SearchForm } from "@/components/features/search-form";
 import { PaginationControls, parsePage } from "@/components/features/pagination-controls";
+import { Button } from "@/components/ui/button";
+import { IconPlus } from "@tabler/icons-react";
 
 const PAGE_SIZE = 20;
 
@@ -93,8 +96,16 @@ export default async function DashboardPage({
   const page = parsePage(pageParam);
 
   return (
-    <div className="p-6">
-      <h1 className="mb-6 text-xl font-semibold">Your links</h1>
+    <div className="animate-in fade-in slide-in-from-bottom-2 p-6 duration-500">
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <h1 className="text-xl font-semibold tracking-tight">Your links</h1>
+        <Button asChild size="sm" className="group/cta gap-1.5">
+          <Link href="/dashboard/new">
+            <IconPlus className="size-4" />
+            New link
+          </Link>
+        </Button>
+      </div>
       <SearchForm defaultValue={query} />
       <Suspense key={`${query}-${page}`} fallback={<LinksTableSkeleton />}>
         <LinksSection userId={userId} query={query} page={page} />

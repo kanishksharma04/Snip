@@ -14,10 +14,10 @@ export function RangeTabs({ linkId, activeDays }: { linkId: string; activeDays: 
           key={days}
           href={`/dashboard/${linkId}?range=${days}`}
           className={cn(
-            "rounded-md px-3 py-1 text-sm",
+            "rounded-md px-3 py-1 text-sm transition-colors",
             days === activeDays
               ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:bg-muted",
+              : "text-muted-foreground hover:bg-muted hover:text-foreground",
           )}
         >
           {days}d

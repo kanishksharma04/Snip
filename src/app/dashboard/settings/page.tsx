@@ -23,9 +23,9 @@ export default async function SettingsPage() {
   });
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="animate-in fade-in slide-in-from-bottom-2 flex flex-col gap-6 p-6 duration-500">
       <div>
-        <h1 className="text-xl font-semibold">API keys</h1>
+        <h1 className="text-xl font-semibold tracking-tight">API keys</h1>
         <p className="text-muted-foreground text-sm">
           Generate a key to use Snip&apos;s public API. Keys are shown in full exactly once.
         </p>
