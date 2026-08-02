@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { getOwnedLink } from "@/lib/links";
-import { getSnipBaseUrl } from "@/lib/validations";
+import { buildShortUrl } from "@/lib/validations";
 import {
   getClicksOverTime,
   getCountryBreakdown,
@@ -85,7 +85,7 @@ export default async function LinkDetailPage({
     notFound();
   }
 
-  const shortUrl = `${getSnipBaseUrl()}/${link.slug}`;
+  const shortUrl = buildShortUrl(link);
 
   // DailyStat rows are never deleted (only raw ClickEvent rows are, by
   // retention), so this genuinely grows by a day every day the cron runs —

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { getSnipBaseUrl } from "@/lib/validations";
+import { buildShortUrl } from "@/lib/validations";
 import { generateQrPng } from "@/lib/qrcode";
 
 export const runtime = "nodejs";
@@ -19,23 +19,24 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const link = await db.link.findFirst({
     where: { id, userId },
-    select: { slug: true },
+    select: { slug: true, domain: { select: { hostname: true } } },
   });
   if (!link) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
   // The PNG is a pure function of the slug (there's no rename-slug action —
-  // it's fixed for the link's lifetime) and SNIP_BASE_URL (fixed per
-  // deployment), so it's genuinely immutable for this URL, not just
-  // slow-changing. The slug itself doubles as the ETag: it changes if and
+  // it's fixed for the link's lifetime), its assigned domain (also fixed at
+  // creation — no reassign-domain action either), and SNIP_BASE_URL (fixed
+  // per deployment), so it's genuinely immutable for this URL, not just
+  // slow-changing. slug + domain double as the ETag: they change if and
   // only if the image content would.
-  const etag = `"qr-${link.slug}"`;
+  const etag = `"qr-${link.slug}-${link.domain?.hostname ?? "default"}"`;
   if (request.headers.get("if-none-match") === etag) {
     return new NextResponse(null, { status: 304, headers: { ETag: etag } });
   }
 
-  const shortUrl = `${getSnipBaseUrl()}/${link.slug}`;
+  const shortUrl = buildShortUrl(link);
   const png = await generateQrPng(shortUrl);
 
   // "inline", not "attachment": this same response backs both the <img> tag

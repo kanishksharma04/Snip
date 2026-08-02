@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { generateSlug } from "@/lib/slug";
-import { customSlugSchema, destinationSchema, getSnipBaseUrl } from "@/lib/validations";
+import { customSlugSchema, destinationSchema, buildShortUrl } from "@/lib/validations";
 import { redis, LINK_CACHE_PREFIX } from "@/lib/redis";
 import { authenticatedLinkCreationLimit, retryAfterSeconds } from "@/lib/ratelimit";
 import { isSlugCollision } from "@/lib/prisma-errors";
@@ -19,17 +19,56 @@ export type CreateLinkInput = {
   destination: string;
   customSlug?: string;
   expiresAt?: Date;
+  domainId?: string;
 };
 
-// The short URL is built here, server-side, from SNIP_BASE_URL — that env
-// var is server-only (not NEXT_PUBLIC_-prefixed) so a Client Component
-// reading it directly would get `undefined` at runtime, not a build error.
-// The client never constructs this URL itself; it only renders what the
-// action gives it.
+type LinkWithDomain = Link & { domain: { hostname: string } | null };
+
+// The short URL is built here, server-side — buildShortUrl falls back to
+// SNIP_BASE_URL (a server-only env var) when the link has no domain
+// attached. The client never constructs this URL itself; it only renders
+// what the action gives it.
 export type CreateLinkResult = Link & { shortUrl: string };
 
-function toResult(link: Link): CreateLinkResult {
-  return { ...link, shortUrl: `${getSnipBaseUrl()}/${link.slug}` };
+function toResult(link: LinkWithDomain): CreateLinkResult {
+  return { ...link, shortUrl: buildShortUrl(link) };
+}
+
+// Attack: same class as destinationSchema's own SNIP_BASE_URL loop check,
+// extended to cover custom domains — a link whose destination is any
+// verified domain (this user's or anyone else's) would loop back into Snip,
+// since a verified domain is presumed to actually route here. Requires a DB
+// query, so it can't live inside the shared (client-safe, synchronous)
+// destinationSchema — this runs only on the server, right after that schema
+// passes.
+async function pointsAtAVerifiedDomain(destination: string): Promise<boolean> {
+  const hostname = new URL(destination).hostname.toLowerCase();
+  const match = await db.domain.findFirst({
+    where: { hostname, verifiedAt: { not: null } },
+    select: { id: true },
+  });
+  return match !== null;
+}
+
+const DOMAIN_LOOP_ERROR = "Destination cannot point back to Snip.";
+
+// Re-validates and resolves a client-supplied domainId into a Prisma
+// `data` fragment — never trusts the claim that a domain belongs to this
+// user, the same trust boundary every other write in this file enforces.
+async function resolveDomainId(
+  domainId: string | undefined,
+  userId: string,
+): Promise<{ ok: true; domainId: string | null } | { ok: false; error: string }> {
+  if (domainId === undefined) return { ok: true, domainId: null };
+
+  const domain = await db.domain.findFirst({
+    where: { id: domainId, userId, verifiedAt: { not: null } },
+    select: { id: true },
+  });
+  if (!domain) {
+    return { ok: false, error: "That domain isn't available." };
+  }
+  return { ok: true, domainId: domain.id };
 }
 
 export async function createLink(
@@ -63,9 +102,19 @@ export async function createLink(
   }
   const destination = destinationResult.data;
 
+  if (await pointsAtAVerifiedDomain(destination)) {
+    return { success: false, error: DOMAIN_LOOP_ERROR };
+  }
+
   if (input.expiresAt && input.expiresAt.getTime() <= Date.now()) {
     return { success: false, error: "Expiry date must be in the future." };
   }
+
+  const domainResult = await resolveDomainId(input.domainId, userId);
+  if (!domainResult.ok) {
+    return { success: false, error: domainResult.error, field: "domainId" };
+  }
+  const domainId = domainResult.domainId;
 
   if (input.customSlug !== undefined) {
     const slugResult = customSlugSchema.safeParse(input.customSlug);
@@ -86,8 +135,11 @@ export async function createLink(
       const link = await db.link.create({
         // userId comes from the session only, never from `input` — a
         // client could put any userId in a form field, and trusting it
-        // would let one user create links owned by someone else.
-        data: { userId, slug, destination, expiresAt: input.expiresAt },
+        // would let one user create links owned by someone else. domainId
+        // is resolved (and re-verified as this user's own) above, same
+        // reasoning.
+        data: { userId, slug, destination, expiresAt: input.expiresAt, domainId },
+        include: { domain: { select: { hostname: true } } },
       });
       revalidatePath("/dashboard");
       return { success: true, data: toResult(link) };
@@ -110,7 +162,8 @@ export async function createLink(
     const slug = generateSlug();
     try {
       const link = await db.link.create({
-        data: { userId, slug, destination, expiresAt: input.expiresAt },
+        data: { userId, slug, destination, expiresAt: input.expiresAt, domainId },
+        include: { domain: { select: { hostname: true } } },
       });
       revalidatePath("/dashboard");
       return { success: true, data: toResult(link) };
@@ -165,6 +218,9 @@ export async function updateLink(
       };
     }
     destination = result.data;
+    if (await pointsAtAVerifiedDomain(destination)) {
+      return { success: false, error: DOMAIN_LOOP_ERROR, field: "destination" };
+    }
   }
 
   if (input.expiresAt && input.expiresAt.getTime() <= Date.now()) {
@@ -185,7 +241,10 @@ export async function updateLink(
     return { success: false, error: NOT_FOUND_ERROR };
   }
 
-  const updated = await db.link.findUniqueOrThrow({ where: { id: linkId } });
+  const updated = await db.link.findUniqueOrThrow({
+    where: { id: linkId },
+    include: { domain: { select: { hostname: true } } },
+  });
 
   // Cache invalidation: one exact known key, deleted before returning —
   // never a pattern, never SCAN/KEYS. A stale cache entry on an updated
@@ -248,7 +307,10 @@ export async function toggleLinkActive(
     return { success: false, error: NOT_FOUND_ERROR };
   }
 
-  const updated = await db.link.findUniqueOrThrow({ where: { id: linkId } });
+  const updated = await db.link.findUniqueOrThrow({
+    where: { id: linkId },
+    include: { domain: { select: { hostname: true } } },
+  });
 
   // Disabling a link must take effect on the very next request — a stale
   // "active" cache entry would keep redirecting after the owner turned it

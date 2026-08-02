@@ -25,6 +25,15 @@ function getSnipBaseUrlSafe(): string | null {
   }
 }
 
+// Every short URL in the app is built through this one function — a link
+// with a verified custom domain attached is served from that hostname,
+// everything else falls back to SNIP_BASE_URL exactly as before this
+// feature existed.
+export function buildShortUrl(link: { slug: string; domain?: { hostname: string } | null }): string {
+  const base = link.domain ? `https://${link.domain.hostname}` : getSnipBaseUrl();
+  return `${base}/${link.slug}`;
+}
+
 function ipv4ToInt(ip: string): number | null {
   const parts = ip.split(".");
   if (parts.length !== 4) return null;
@@ -182,6 +191,27 @@ export const customSlugSchema = z
   // duplicating the list, so the two can't drift apart.
   .refine((slug) => !isReserved(slug), "This slug is reserved");
 
+const HOSTNAME_LABEL = /^(?!-)[a-zA-Z0-9-]{1,63}(?<!-)$/;
+
+export const hostnameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(253, "Domain is too long")
+  .refine((value) => {
+    const labels = value.split(".");
+    return labels.length >= 2 && labels.every((label) => HOSTNAME_LABEL.test(label));
+  }, "Must be a valid domain name, e.g. go.example.com")
+  // Attack surface avoided, not attacked: an IP-literal "hostname" can never
+  // be proven via DNS TXT the way a real domain can, so it's rejected here
+  // rather than accepted and left permanently unverifiable.
+  .refine((value) => ipv4ToInt(value) === null, "Must be a domain name, not an IP address")
+  .refine((value) => {
+    const baseUrl = getSnipBaseUrlSafe();
+    const baseHostname = baseUrl ? new URL(baseUrl).hostname.toLowerCase() : null;
+    return value !== baseHostname;
+  }, "This is already Snip's default domain");
+
 // An untouched optional <input> in a React Hook Form submits "", not
 // undefined. "" would fail customSlugSchema's {3,32} length check even
 // though the user never touched the field — so both optional form fields
@@ -226,6 +256,15 @@ export const formSchema = z.object({
     .transform(emptyStringToUndefined)
     .pipe(z.string().optional())
     .transform((value) => (value ? parseIstDatetimeLocal(value) : undefined)),
+  // Optional at the key level too (unlike customSlug/expiresAt above) so
+  // callers that never touch this field — e.g. this file's own pre-existing
+  // tests — can omit it entirely, not just pass "". "" means "no domain
+  // selected" (the default-domain <Select> item), same empty-string
+  // convention as the other fields.
+  domainId: z
+    .string()
+    .optional()
+    .transform((value) => (value ? value : undefined)),
 });
 
 export type FormInput = z.input<typeof formSchema>;

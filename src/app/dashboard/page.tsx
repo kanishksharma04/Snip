@@ -57,6 +57,7 @@ async function LinksSection({
         createdAt: true,
         isActive: true,
         expiresAt: true,
+        domain: { select: { hostname: true } },
       },
     }),
     db.link.count({ where }),

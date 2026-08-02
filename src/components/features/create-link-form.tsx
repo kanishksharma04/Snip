@@ -9,6 +9,13 @@ import { formSchema, type FormInput, type FormOutput } from "@/lib/validations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Form,
   FormControl,
   FormField,
@@ -23,12 +30,23 @@ function copyToClipboard(text: string) {
   });
 }
 
-export function CreateLinkForm() {
+// Radix's <Select.Item> rejects an empty-string value (it's reserved
+// internally for "nothing selected" / the placeholder state), but "no
+// domain selected" is exactly what formSchema's domainId field represents
+// with "". This sentinel is a UI-only detail — it never reaches the form's
+// actual value.
+const DEFAULT_DOMAIN_VALUE = "__default__";
+
+export function CreateLinkForm({
+  verifiedDomains = [],
+}: {
+  verifiedDomains?: { id: string; hostname: string }[];
+}) {
   const [isPending, startTransition] = useTransition();
 
   const form = useForm<FormInput, unknown, FormOutput>({
     resolver: zodResolver(formSchema),
-    defaultValues: { destination: "", customSlug: "", expiresAt: "" },
+    defaultValues: { destination: "", customSlug: "", expiresAt: "", domainId: "" },
   });
 
   const onSubmit: SubmitHandler<FormOutput> = (values) => {
@@ -98,6 +116,39 @@ export function CreateLinkForm() {
             </FormItem>
           )}
         />
+
+        {verifiedDomains.length > 0 && (
+          <FormField
+            control={form.control}
+            name="domainId"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Domain (optional)</FormLabel>
+                <Select
+                  value={field.value || DEFAULT_DOMAIN_VALUE}
+                  onValueChange={(value) =>
+                    field.onChange(value === DEFAULT_DOMAIN_VALUE ? "" : value)
+                  }
+                >
+                  <FormControl>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Default" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value={DEFAULT_DOMAIN_VALUE}>Default</SelectItem>
+                    {verifiedDomains.map((domain) => (
+                      <SelectItem key={domain.id} value={domain.id}>
+                        {domain.hostname}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
 
         <FormField
           control={form.control}

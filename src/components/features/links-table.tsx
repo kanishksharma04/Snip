@@ -19,7 +19,7 @@ import {
 import { CopyShortUrlMenuItem } from "@/components/features/copy-short-url-menu-item";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateIst, isPast } from "@/lib/format";
-import { getSnipBaseUrl } from "@/lib/validations";
+import { buildShortUrl } from "@/lib/validations";
 import { IconDots } from "@tabler/icons-react";
 
 export function LinksTableSkeleton() {
@@ -40,6 +40,7 @@ type LinkRow = {
   createdAt: Date;
   isActive: boolean;
   expiresAt: Date | null;
+  domain: { hostname: string } | null;
 };
 
 export function LinksTable({
@@ -80,8 +81,6 @@ export function LinksTable({
     );
   }
 
-  const baseUrl = getSnipBaseUrl();
-
   return (
     <div className="animate-in fade-in overflow-hidden rounded-xl border duration-500">
       <Table>
@@ -97,7 +96,7 @@ export function LinksTable({
         </TableHeader>
         <TableBody>
           {links.map((link) => {
-            const shortUrl = `${baseUrl}/${link.slug}`;
+            const shortUrl = buildShortUrl(link);
             const isExpired = link.expiresAt !== null && isPast(link.expiresAt);
 
             return (

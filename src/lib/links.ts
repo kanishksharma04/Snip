@@ -8,6 +8,13 @@ import { db } from "@/lib/db";
 export const getOwnedLink = cache(async (id: string, userId: string) => {
   return db.link.findFirst({
     where: { id, userId },
-    select: { id: true, slug: true, destination: true, clickCount: true, isActive: true },
+    select: {
+      id: true,
+      slug: true,
+      destination: true,
+      clickCount: true,
+      isActive: true,
+      domain: { select: { hostname: true } },
+    },
   });
 });

@@ -2,9 +2,16 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { Prisma } from "@/generated/prisma/client";
 
 const mockCreate = vi.fn();
+// No verified domain matches by default in these tests — the redirect-loop
+// guard and domainId resolution both call db.domain.findFirst, and neither
+// is what this file's collision-retry tests are about.
+const mockDomainFindFirst = vi.fn();
 
 vi.mock("@/lib/db", () => ({
-  db: { link: { create: (...args: unknown[]) => mockCreate(...args) } },
+  db: {
+    link: { create: (...args: unknown[]) => mockCreate(...args) },
+    domain: { findFirst: (...args: unknown[]) => mockDomainFindFirst(...args) },
+  },
 }));
 
 vi.mock("@/lib/session", () => ({
@@ -32,6 +39,8 @@ function slugCollisionError(field = "slug") {
 
 beforeEach(() => {
   mockCreate.mockReset();
+  mockDomainFindFirst.mockReset();
+  mockDomainFindFirst.mockResolvedValue(null);
   vi.mocked(getSession).mockResolvedValue({
     user: { id: "user_1" },
   } as never);
@@ -109,5 +118,28 @@ describe("createLink — non-collision failures never retry", () => {
 
     expect(mockCreate).toHaveBeenCalledTimes(1);
     expect(result.success).toBe(false);
+  });
+});
+
+describe("createLink — redirect-loop guard against verified custom domains", () => {
+  it("rejects a destination hostname that matches a verified domain", async () => {
+    mockDomainFindFirst.mockResolvedValueOnce({ id: "domain_1" });
+
+    const result = await createLink({ destination: "https://go.example.com/anything" });
+
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toMatch(/point back to snip/i);
+    }
+  });
+
+  it("allows a destination that doesn't match any verified domain", async () => {
+    mockDomainFindFirst.mockResolvedValueOnce(null);
+    mockCreate.mockResolvedValueOnce({ id: "link_1", slug: "abcdefg", destination: "https://example.com" });
+
+    const result = await createLink({ destination: "https://example.com" });
+
+    expect(result.success).toBe(true);
   });
 });

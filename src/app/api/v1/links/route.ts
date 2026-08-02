@@ -4,7 +4,7 @@ import { authenticateApiRequest } from "@/lib/api-auth";
 import { apiLimit, retryAfterSeconds } from "@/lib/ratelimit";
 import { isSlugCollision } from "@/lib/prisma-errors";
 import { generateSlug } from "@/lib/slug";
-import { customSlugSchema, destinationSchema, getSnipBaseUrl } from "@/lib/validations";
+import { customSlugSchema, destinationSchema, buildShortUrl } from "@/lib/validations";
 
 export const runtime = "nodejs";
 
@@ -46,17 +46,50 @@ function toApiShape(link: {
   isActive: boolean;
   expiresAt: Date | null;
   createdAt: Date;
+  domain: { hostname: string } | null;
 }) {
   return {
     id: link.id,
     slug: link.slug,
-    shortUrl: `${getSnipBaseUrl()}/${link.slug}`,
+    shortUrl: buildShortUrl(link),
     destination: link.destination,
     clickCount: link.clickCount,
     isActive: link.isActive,
     expiresAt: link.expiresAt,
     createdAt: link.createdAt,
   };
+}
+
+// Same loop-prevention reasoning as src/lib/actions/links.ts's identically
+// named check — kept as a separate copy rather than a shared import because
+// this is the one place a client (not this codebase's own UI) supplies
+// input directly, and duplicating a four-line query here is cheaper than a
+// cross-cutting shared module for one call site on each side.
+async function pointsAtAVerifiedDomain(destination: string): Promise<boolean> {
+  const hostname = new URL(destination).hostname.toLowerCase();
+  const match = await db.domain.findFirst({
+    where: { hostname, verifiedAt: { not: null } },
+    select: { id: true },
+  });
+  return match !== null;
+}
+
+async function resolveDomainId(
+  domainId: unknown,
+  userId: string,
+): Promise<{ ok: true; domainId: string | null } | { ok: false; error: string }> {
+  if (domainId === undefined) return { ok: true, domainId: null };
+  if (typeof domainId !== "string") {
+    return { ok: false, error: "domainId must be a string" };
+  }
+  const domain = await db.domain.findFirst({
+    where: { id: domainId, userId, verifiedAt: { not: null } },
+    select: { id: true },
+  });
+  if (!domain) {
+    return { ok: false, error: "That domain isn't available" };
+  }
+  return { ok: true, domainId: domain.id };
 }
 
 export async function POST(request: Request) {
@@ -70,7 +103,7 @@ export async function POST(request: Request) {
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
-  const { destination, customSlug, expiresAt } = body as Record<string, unknown>;
+  const { destination, customSlug, expiresAt, domainId } = body as Record<string, unknown>;
 
   const destinationResult = destinationSchema.safeParse(destination);
   if (!destinationResult.success) {
@@ -78,6 +111,15 @@ export async function POST(request: Request) {
       { error: destinationResult.error.issues[0]?.message ?? "Invalid destination URL" },
       { status: 400 },
     );
+  }
+
+  if (await pointsAtAVerifiedDomain(destinationResult.data)) {
+    return NextResponse.json({ error: "Destination cannot point back to Snip" }, { status: 400 });
+  }
+
+  const domainResult = await resolveDomainId(domainId, auth.userId);
+  if (!domainResult.ok) {
+    return NextResponse.json({ error: domainResult.error }, { status: 400 });
   }
 
   let expiresAtDate: Date | undefined;
@@ -111,7 +153,9 @@ export async function POST(request: Request) {
           slug: slugResult.data,
           destination: destinationResult.data,
           expiresAt: expiresAtDate,
+          domainId: domainResult.domainId,
         },
+        include: { domain: { select: { hostname: true } } },
       });
       return NextResponse.json(toApiShape(link), { status: 201 });
     } catch (error) {
@@ -130,7 +174,9 @@ export async function POST(request: Request) {
           slug: generateSlug(),
           destination: destinationResult.data,
           expiresAt: expiresAtDate,
+          domainId: domainResult.domainId,
         },
+        include: { domain: { select: { hostname: true } } },
       });
       return NextResponse.json(toApiShape(link), { status: 201 });
     } catch (error) {
@@ -165,6 +211,7 @@ export async function GET(request: Request) {
         isActive: true,
         expiresAt: true,
         createdAt: true,
+        domain: { select: { hostname: true } },
       },
     }),
     db.link.count({ where: { userId: auth.userId } }),

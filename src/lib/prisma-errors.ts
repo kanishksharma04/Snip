@@ -25,13 +25,20 @@ function getUniqueConstraintFields(error: Prisma.PrismaClientKnownRequestError):
   return fields.filter((field): field is string => typeof field === "string");
 }
 
-// A catch-all `catch (e)` would treat a genuine database outage as a slug
-// collision and retry through it three times before reporting the wrong
-// cause. Collision handling only applies to P2002 on the slug column
-// specifically — any other error (or a P2002 on a different constraint)
-// must fail immediately.
-export function isSlugCollision(error: unknown): boolean {
+// A catch-all `catch (e)` would treat a genuine database outage as a
+// collision and retry/misreport through it. Collision handling only applies
+// to a P2002 on the exact field named — any other error (or a P2002 on a
+// different constraint) must fail immediately.
+function isUniqueConstraintViolationOn(error: unknown, field: string): boolean {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
   if (error.code !== "P2002") return false;
-  return getUniqueConstraintFields(error).includes("slug");
+  return getUniqueConstraintFields(error).includes(field);
+}
+
+export function isSlugCollision(error: unknown): boolean {
+  return isUniqueConstraintViolationOn(error, "slug");
+}
+
+export function isHostnameCollision(error: unknown): boolean {
+  return isUniqueConstraintViolationOn(error, "hostname");
 }

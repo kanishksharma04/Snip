@@ -11,6 +11,7 @@ Built with Next.js 16, Postgres (via Prisma 7), and Redis.
 - Every click is recorded in the background — user agent, rough location, referrer, and a daily-rotating hashed IP (never the raw IP)
 - A dashboard with search, pagination, and per-link charts (clicks over time, referrers, devices, countries)
 - Downloadable QR codes for every link
+- Custom domains: attach your own domain to a link instead of the shared default (see [Custom domains](#custom-domains))
 - A public API (`/api/v1/*`) authenticated with API keys — keys are hashed in storage and shown to you in full exactly once
 - Rate limits on redirects, link creation, and the API
 - A no-login demo on the landing page: shorten one link without an account (rate-limited, expires after 24 hours)
@@ -151,6 +152,17 @@ curl https://snip-blush.vercel.app/api/v1/links/{id}/stats \
 ```
 
 A missing, wrong, or revoked key gets a `401`. Going over the daily limit gets a `429` with a `Retry-After` header telling you when to try again. These examples were all run for real against a real generated key before being written down here.
+
+`POST /api/v1/links` also accepts an optional `domainId` — the id of one of your own verified domains (see below). Omit it, or leave it out entirely, to get a link on the default domain.
+
+## Custom domains
+
+You can attach your own domain (e.g. `go.example.com`) to links instead of using the shared default domain. This is two separate steps, and only the first one happens inside Snip:
+
+1. **Prove you own it, inside Snip.** From `/dashboard/settings` → Domains, add the domain. Snip generates a random token and asks you to publish it as a DNS TXT record (`_snip-challenge.go.example.com`). Click Verify once it's live — Snip looks the record up directly (no third-party service involved) and marks the domain verified if it matches. This step only proves ownership *inside Snip's own database*; a verified domain becomes selectable when creating a new link.
+2. **Actually route traffic there.** Snip does not call Vercel's API to attach the domain for you (this project has no `VERCEL_TOKEN` configured, and that's a deliberate choice, not an oversight). You still need to add the domain in the Vercel project's own Settings → Domains, and point your DNS at Vercel the way it asks (usually a CNAME). Until you do this, a verified-in-Snip domain simply won't receive any traffic — visiting it won't reach this app at all.
+
+Both steps are required. A domain that's verified in Snip but never added in Vercel just sits there unused; a domain added in Vercel without ever being verified in Snip can't be selected for a link in the first place. Deleting a domain detaches any links using it back to the default domain — it doesn't delete the links themselves.
 
 ## Why some things are built this way
 

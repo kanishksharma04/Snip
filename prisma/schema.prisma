@@ -23,6 +23,7 @@ model User {
   sessions Session[]
   links    Link[]
   apiKeys  ApiKey[]
+  domains  Domain[]
 }
 
 model Account {
@@ -68,6 +69,11 @@ model Link {
   // queries, so anonymous links simply never appear in anyone's dashboard,
   // by construction rather than by an extra flag.
   userId      String?
+  // Nullable: a link with no domain is served on SNIP_BASE_URL, the
+  // long-standing default. Slugs stay globally unique regardless of domain
+  // (see Domain's comment) — this column only changes which hostname a
+  // link's short URL is displayed/QR-coded with, never how it's looked up.
+  domainId    String?
   slug        String    @unique
   destination String
   title       String?
@@ -80,11 +86,35 @@ model Link {
   updatedAt   DateTime  @updatedAt
 
   user        User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // SetNull, not Cascade: deleting a domain detaches its links back to the
+  // SNIP_BASE_URL default rather than destroying them — the same reasoning
+  // as the nullable userId above.
+  domain      Domain?      @relation(fields: [domainId], references: [id], onDelete: SetNull)
   clickEvents ClickEvent[]
   dailyStats  DailyStat[]
 
   @@index([userId])
   @@index([userId, createdAt])
+}
+
+// A custom hostname a user can attach their links to instead of the shared
+// SNIP_BASE_URL. Ownership is proven with a DNS TXT record (see
+// src/lib/domains.ts) before a domain can be selected for a link — verifying
+// inside Snip is a separate step from actually routing traffic to this app,
+// which still requires adding the domain in Vercel's own project settings
+// (see the README's "Custom domains" section).
+model Domain {
+  id          String    @id @default(cuid())
+  userId      String
+  hostname    String    @unique
+  verifyToken String
+  verifiedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  links Link[]
+
+  @@index([userId])
 }
 
 model ClickEvent {
