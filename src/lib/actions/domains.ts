@@ -9,7 +9,7 @@ import { generateVerifyToken, checkDomainVerification } from "@/lib/domains";
 import type { ActionResult } from "@/types/action";
 
 const NOT_FOUND_ERROR = "Domain not found.";
-const MAX_DOMAINS_PER_USER = 10;
+const MAX_DOMAINS_PER_ORGANIZATION = 10;
 
 export type DomainRow = {
   id: string;
@@ -22,7 +22,8 @@ export type DomainRow = {
 export async function addDomain(hostname: string): Promise<ActionResult<DomainRow>> {
   const session = await getSession();
   const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!userId || !organizationId) {
     return { success: false, error: "You must be signed in." };
   }
 
@@ -35,14 +36,17 @@ export async function addDomain(hostname: string): Promise<ActionResult<DomainRo
     };
   }
 
-  const existingCount = await db.domain.count({ where: { userId } });
-  if (existingCount >= MAX_DOMAINS_PER_USER) {
-    return { success: false, error: `You can have at most ${MAX_DOMAINS_PER_USER} domains.` };
+  const existingCount = await db.domain.count({ where: { organizationId } });
+  if (existingCount >= MAX_DOMAINS_PER_ORGANIZATION) {
+    return {
+      success: false,
+      error: `You can have at most ${MAX_DOMAINS_PER_ORGANIZATION} domains.`,
+    };
   }
 
   try {
     const domain = await db.domain.create({
-      data: { userId, hostname: hostnameResult.data, verifyToken: generateVerifyToken() },
+      data: { userId, organizationId, hostname: hostnameResult.data, verifyToken: generateVerifyToken() },
     });
     revalidatePath("/dashboard/settings");
     return { success: true, data: domain };
@@ -56,12 +60,12 @@ export async function addDomain(hostname: string): Promise<ActionResult<DomainRo
 
 export async function verifyDomain(id: string): Promise<ActionResult<DomainRow>> {
   const session = await getSession();
-  const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!organizationId) {
     return { success: false, error: "You must be signed in." };
   }
 
-  const existing = await db.domain.findFirst({ where: { id, userId } });
+  const existing = await db.domain.findFirst({ where: { id, organizationId } });
   if (!existing) {
     return { success: false, error: NOT_FOUND_ERROR };
   }
@@ -91,12 +95,12 @@ export async function verifyDomain(id: string): Promise<ActionResult<DomainRow>>
 
 export async function deleteDomain(id: string): Promise<ActionResult<{ id: string }>> {
   const session = await getSession();
-  const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!organizationId) {
     return { success: false, error: "You must be signed in." };
   }
 
-  const { count } = await db.domain.deleteMany({ where: { id, userId } });
+  const { count } = await db.domain.deleteMany({ where: { id, organizationId } });
   if (count === 0) {
     return { success: false, error: NOT_FOUND_ERROR };
   }

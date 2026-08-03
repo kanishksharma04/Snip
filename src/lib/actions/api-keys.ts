@@ -17,7 +17,8 @@ export type CreateApiKeyResult = { id: string; name: string; keyPrefix: string; 
 export async function createApiKey(name: string): Promise<ActionResult<CreateApiKeyResult>> {
   const session = await getSession();
   const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!userId || !organizationId) {
     return { success: false, error: "You must be signed in." };
   }
 
@@ -31,8 +32,10 @@ export async function createApiKey(name: string): Promise<ActionResult<CreateApi
 
   const { plaintext, keyHash, keyPrefix } = generateApiKey();
 
+  // Bound to this organization for the key's whole lifetime, regardless of
+  // which org its creator has active later — see api-auth.ts's comment.
   const apiKey = await db.apiKey.create({
-    data: { userId, name: trimmedName, keyHash, keyPrefix },
+    data: { userId, organizationId, name: trimmedName, keyHash, keyPrefix },
     select: { id: true, name: true, keyPrefix: true },
   });
 
@@ -42,13 +45,13 @@ export async function createApiKey(name: string): Promise<ActionResult<CreateApi
 
 export async function revokeApiKey(id: string): Promise<ActionResult<{ id: string }>> {
   const session = await getSession();
-  const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!organizationId) {
     return { success: false, error: "You must be signed in." };
   }
 
   const { count } = await db.apiKey.updateMany({
-    where: { id, userId, revokedAt: null },
+    where: { id, organizationId, revokedAt: null },
     data: { revokedAt: new Date() },
   });
   if (count === 0) {

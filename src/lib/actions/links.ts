@@ -54,15 +54,16 @@ const DOMAIN_LOOP_ERROR = "Destination cannot point back to Snip.";
 
 // Re-validates and resolves a client-supplied domainId into a Prisma
 // `data` fragment — never trusts the claim that a domain belongs to this
-// user, the same trust boundary every other write in this file enforces.
+// organization, the same trust boundary every other write in this file
+// enforces.
 async function resolveDomainId(
   domainId: string | undefined,
-  userId: string,
+  organizationId: string,
 ): Promise<{ ok: true; domainId: string | null } | { ok: false; error: string }> {
   if (domainId === undefined) return { ok: true, domainId: null };
 
   const domain = await db.domain.findFirst({
-    where: { id: domainId, userId, verifiedAt: { not: null } },
+    where: { id: domainId, organizationId, verifiedAt: { not: null } },
     select: { id: true },
   });
   if (!domain) {
@@ -76,7 +77,8 @@ export async function createLink(
 ): Promise<ActionResult<CreateLinkResult>> {
   const session = await getSession();
   const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!userId || !organizationId) {
     return { success: false, error: "You must be signed in to create a link." };
   }
 
@@ -84,7 +86,8 @@ export async function createLink(
   // idiom this codebase already uses for every other rejected input is an
   // ActionResult failure, so an exceeded limit refuses the request the same
   // way a taken slug or invalid URL does, rather than silently succeeding.
-  const rateLimitResult = await authenticatedLinkCreationLimit.limit(userId);
+  // Org-wide, not per-member — see ratelimit.ts's comment.
+  const rateLimitResult = await authenticatedLinkCreationLimit.limit(organizationId);
   if (!rateLimitResult.success) {
     const minutes = Math.ceil(retryAfterSeconds(rateLimitResult.reset) / 60);
     return {
@@ -110,7 +113,7 @@ export async function createLink(
     return { success: false, error: "Expiry date must be in the future." };
   }
 
-  const domainResult = await resolveDomainId(input.domainId, userId);
+  const domainResult = await resolveDomainId(input.domainId, organizationId);
   if (!domainResult.ok) {
     return { success: false, error: domainResult.error, field: "domainId" };
   }
@@ -133,12 +136,12 @@ export async function createLink(
     // concurrency).
     try {
       const link = await db.link.create({
-        // userId comes from the session only, never from `input` — a
-        // client could put any userId in a form field, and trusting it
-        // would let one user create links owned by someone else. domainId
-        // is resolved (and re-verified as this user's own) above, same
-        // reasoning.
-        data: { userId, slug, destination, expiresAt: input.expiresAt, domainId },
+        // userId/organizationId come from the session only, never from
+        // `input` — a client could put any id in a form field, and trusting
+        // it would let one user create links owned by someone else's org.
+        // domainId is resolved (and re-verified as this org's own) above,
+        // same reasoning.
+        data: { userId, organizationId, slug, destination, expiresAt: input.expiresAt, domainId },
         include: { domain: { select: { hostname: true } } },
       });
       revalidatePath("/dashboard");
@@ -162,7 +165,7 @@ export async function createLink(
     const slug = generateSlug();
     try {
       const link = await db.link.create({
-        data: { userId, slug, destination, expiresAt: input.expiresAt, domainId },
+        data: { userId, organizationId, slug, destination, expiresAt: input.expiresAt, domainId },
         include: { domain: { select: { hostname: true } } },
       });
       revalidatePath("/dashboard");
@@ -191,19 +194,19 @@ export async function updateLink(
   input: UpdateLinkInput,
 ): Promise<ActionResult<CreateLinkResult>> {
   const session = await getSession();
-  const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!organizationId) {
     return { success: false, error: "You must be signed in." };
   }
 
   const existing = await db.link.findUnique({
     where: { id: linkId },
-    select: { userId: true, slug: true },
+    select: { organizationId: true, slug: true },
   });
   // Same response for "doesn't exist" and "exists but isn't yours" — a
   // distinct message for the latter would let a user probe which link IDs
   // are real.
-  if (!existing || existing.userId !== userId) {
+  if (!existing || existing.organizationId !== organizationId) {
     return { success: false, error: NOT_FOUND_ERROR };
   }
 
@@ -227,11 +230,12 @@ export async function updateLink(
     return { success: false, error: "Expiry date must be in the future.", field: "expiresAt" };
   }
 
-  // Scoped by userId as well as id — belt-and-braces alongside the read
-  // above, so the actual mutation can never apply to a row this session
-  // doesn't own even if that changed between the two statements.
+  // Scoped by organizationId as well as id — belt-and-braces alongside the
+  // read above, so the actual mutation can never apply to a row this
+  // session's org doesn't own even if that changed between the two
+  // statements.
   const { count } = await db.link.updateMany({
-    where: { id: linkId, userId },
+    where: { id: linkId, organizationId },
     data: {
       ...(destination !== undefined ? { destination } : {}),
       ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
@@ -258,20 +262,20 @@ export async function updateLink(
 
 export async function deleteLink(linkId: string): Promise<ActionResult<{ id: string }>> {
   const session = await getSession();
-  const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!organizationId) {
     return { success: false, error: "You must be signed in." };
   }
 
   const existing = await db.link.findUnique({
     where: { id: linkId },
-    select: { userId: true, slug: true },
+    select: { organizationId: true, slug: true },
   });
-  if (!existing || existing.userId !== userId) {
+  if (!existing || existing.organizationId !== organizationId) {
     return { success: false, error: NOT_FOUND_ERROR };
   }
 
-  const { count } = await db.link.deleteMany({ where: { id: linkId, userId } });
+  const { count } = await db.link.deleteMany({ where: { id: linkId, organizationId } });
   if (count === 0) {
     return { success: false, error: NOT_FOUND_ERROR };
   }
@@ -286,21 +290,21 @@ export async function toggleLinkActive(
   linkId: string,
 ): Promise<ActionResult<CreateLinkResult>> {
   const session = await getSession();
-  const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!organizationId) {
     return { success: false, error: "You must be signed in." };
   }
 
   const existing = await db.link.findUnique({
     where: { id: linkId },
-    select: { userId: true, slug: true, isActive: true },
+    select: { organizationId: true, slug: true, isActive: true },
   });
-  if (!existing || existing.userId !== userId) {
+  if (!existing || existing.organizationId !== organizationId) {
     return { success: false, error: NOT_FOUND_ERROR };
   }
 
   const { count } = await db.link.updateMany({
-    where: { id: linkId, userId },
+    where: { id: linkId, organizationId },
     data: { isActive: !existing.isActive },
   });
   if (count === 0) {

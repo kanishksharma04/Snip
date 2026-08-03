@@ -13,17 +13,26 @@ datasource db {
 // a mismatch here surfaces in the OAuth callback as an opaque error, not a
 // schema error.
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String    @unique
-  emailVerified DateTime?
-  image         String?
+  id                   String    @id @default(cuid())
+  name                 String?
+  email                String    @unique
+  emailVerified        DateTime?
+  image                String?
+  // Which organization's data this user currently sees in the dashboard.
+  // Nullable only transiently — see prisma/migrations' "add_organizations"
+  // phasing comment on Organization for why this can't be required from the
+  // start, but every real user ends up with one, either via
+  // provisionPersonalOrganization (new sign-ups) or the one-off backfill
+  // script (everyone who existed before organizations did).
+  activeOrganizationId String?
 
-  accounts Account[]
-  sessions Session[]
-  links    Link[]
-  apiKeys  ApiKey[]
-  domains  Domain[]
+  accounts           Account[]
+  sessions           Session[]
+  links              Link[]
+  apiKeys            ApiKey[]
+  domains            Domain[]
+  memberships        OrganizationMember[]
+  activeOrganization Organization?        @relation("ActiveOrganization", fields: [activeOrganizationId], references: [id], onDelete: SetNull)
 }
 
 model Account {
@@ -60,41 +69,110 @@ model VerificationToken {
   @@id([identifier, token])
 }
 
+enum OrgRole {
+  OWNER
+  MEMBER
+}
+
+// Every user gets one of these automatically (see
+// src/lib/organizations.ts's provisionPersonalOrganization, and the
+// scripts/backfill-organizations.ts one-off script for users who existed
+// before this model did) — there is never a real user with zero
+// organizations. Additional, non-personal organizations are created
+// on-demand for sharing links/domains/API keys with others.
+model Organization {
+  id         String   @id @default(cuid())
+  name       String
+  // True only for the auto-created personal org every user gets on sign-up.
+  // Used to label it distinctly in the switcher and to stop a user from
+  // leaving it or losing their one guaranteed organization.
+  isPersonal Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  members        OrganizationMember[]
+  invites        OrganizationInvite[]
+  links          Link[]
+  domains        Domain[]
+  apiKeys        ApiKey[]
+  activeForUsers User[]               @relation("ActiveOrganization")
+}
+
+model OrganizationMember {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  role           OrgRole
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+}
+
+// A shareable (not emailed — this app has no mail provider) link granting
+// membership. src/app/invite/[token]/page.tsx is where a recipient lands;
+// accepting creates the OrganizationMember row.
+model OrganizationInvite {
+  id              String    @id @default(cuid())
+  organizationId  String
+  token           String    @unique
+  role            OrgRole
+  invitedByUserId String
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
 // Domain models.
 model Link {
-  id          String    @id @default(cuid())
-  // Nullable: Step 39's anonymous demo creates links with no owner at all,
-  // not links owned by some placeholder "system" user — a null userId can
-  // never match an authenticated user's `where: { userId }` dashboard
-  // queries, so anonymous links simply never appear in anyone's dashboard,
-  // by construction rather than by an extra flag.
-  userId      String?
+  id             String    @id @default(cuid())
+  // Kept as "created by" provenance only — access control reads
+  // organizationId, not this. Nullable: Step 39's anonymous demo creates
+  // links with no owner at all, not links owned by some placeholder
+  // "system" user.
+  userId         String?
+  // The actual access-control field: a dashboard query is always
+  // `where: { organizationId }`, never userId. Nullable for the same
+  // anonymous-link reason as userId above — a null organizationId can never
+  // match a real org's `where` clause, so anonymous links stay invisible to
+  // everyone by construction. (Nullable at the Prisma level for every
+  // resource right now because of how the organizations migration is
+  // phased — see that migration's comment; Domain/ApiKey below become
+  // required once the one-off backfill script has run.)
+  organizationId String?
   // Nullable: a link with no domain is served on SNIP_BASE_URL, the
   // long-standing default. Slugs stay globally unique regardless of domain
   // (see Domain's comment) — this column only changes which hostname a
   // link's short URL is displayed/QR-coded with, never how it's looked up.
-  domainId    String?
-  slug        String    @unique
-  destination String
-  title       String?
-  isActive    Boolean   @default(true)
-  expiresAt   DateTime?
+  domainId       String?
+  slug           String    @unique
+  destination    String
+  title          String?
+  isActive       Boolean   @default(true)
+  expiresAt      DateTime?
   // Denormalized onto Link so the dashboard list can show click counts for
   // many links in one query, without a GROUP BY COUNT over ClickEvent.
-  clickCount  Int       @default(0)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  clickCount     Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  user        User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // SetNull, not Cascade: deleting a domain detaches its links back to the
-  // SNIP_BASE_URL default rather than destroying them — the same reasoning
-  // as the nullable userId above.
-  domain      Domain?      @relation(fields: [domainId], references: [id], onDelete: SetNull)
-  clickEvents ClickEvent[]
-  dailyStats  DailyStat[]
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // SetNull, not Cascade: deleting the organization or the domain detaches
+  // the link rather than destroying it — same reasoning as the nullable
+  // userId/organizationId above.
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  domain       Domain?       @relation(fields: [domainId], references: [id], onDelete: SetNull)
+  clickEvents  ClickEvent[]
+  dailyStats   DailyStat[]
 
-  @@index([userId])
-  @@index([userId, createdAt])
+  @@index([organizationId])
+  @@index([organizationId, createdAt])
 }
 
 // A custom hostname a user can attach their links to instead of the shared
@@ -104,17 +182,24 @@ model Link {
 // which still requires adding the domain in Vercel's own project settings
 // (see the README's "Custom domains" section).
 model Domain {
-  id          String    @id @default(cuid())
-  userId      String
-  hostname    String    @unique
-  verifyToken String
-  verifiedAt  DateTime?
-  createdAt   DateTime  @default(now())
+  id             String    @id @default(cuid())
+  // Kept as "created by" provenance — access control reads organizationId.
+  userId         String
+  // A Domain always has a real organization owner, same as it always had a
+  // real user owner before organizations existed. (Was briefly nullable
+  // during the add_organizations migration's backfill phase — see that
+  // migration's comment — required from the follow-up migration onward.)
+  organizationId String
+  hostname       String    @unique
+  verifyToken    String
+  verifiedAt     DateTime?
+  createdAt      DateTime  @default(now())
 
-  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  links Link[]
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  links        Link[]
 
-  @@index([userId])
+  @@index([organizationId])
 }
 
 model ClickEvent {
@@ -155,22 +240,30 @@ model DailyStat {
 }
 
 model ApiKey {
-  id         String    @id @default(cuid())
-  userId     String
-  name       String
+  id             String    @id @default(cuid())
+  // Kept as "created by" provenance — access control reads organizationId.
+  userId         String
+  // A key is bound to the organization it was created under for its whole
+  // lifetime, not to whichever org its creator later has active. (Was
+  // briefly nullable during the add_organizations migration's backfill
+  // phase — see that migration's comment — required from the follow-up
+  // migration onward.)
+  organizationId String
+  name           String
   // Only the SHA-256 hash of the key is ever stored — the plaintext is
   // shown to the user exactly once, at creation, and never persisted or
   // recoverable afterward. keyHash is what an incoming request is looked up
   // by; keyPrefix is only the first few characters, kept unhashed purely so
   // the settings page can show "which key is this" without ever storing
   // anything that could reconstruct the real secret.
-  keyHash    String    @unique
-  keyPrefix  String
-  createdAt  DateTime  @default(now())
-  lastUsedAt DateTime?
-  revokedAt  DateTime?
+  keyHash        String    @unique
+  keyPrefix      String
+  createdAt      DateTime  @default(now())
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
+  @@index([organizationId])
 }

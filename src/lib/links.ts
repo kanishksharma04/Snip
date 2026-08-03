@@ -5,9 +5,9 @@ import { db } from "@/lib/db";
 // calls it to decide whether to notFound(), and page.tsx calls it again to
 // get the same data for rendering — without this they'd be two identical
 // DB round trips instead of one.
-export const getOwnedLink = cache(async (id: string, userId: string) => {
+export const getOwnedLink = cache(async (id: string, organizationId: string) => {
   return db.link.findFirst({
-    where: { id, userId },
+    where: { id, organizationId },
     select: {
       id: true,
       slug: true,

@@ -23,8 +23,8 @@ export default async function LinkDetailLayout({
   // segment race each other. Trusting a non-null assertion crashed with a
   // real TypeError instead of ever reaching the parent's redirect.
   const session = await getSession();
-  const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!organizationId) {
     redirect("/login?callbackUrl=/dashboard");
   }
 
@@ -32,8 +32,10 @@ export default async function LinkDetailLayout({
 
   // Same "doesn't exist" vs "exists but isn't yours" non-distinction as
   // every other ownership check in this app — never a distinct response
-  // that would let a user probe which link IDs are real.
-  const link = await getOwnedLink(id, userId);
+  // that would let a user probe which link IDs are real. Scoped by
+  // organization, not the individual signed-in user — any member of the
+  // org that owns this link can see it.
+  const link = await getOwnedLink(id, organizationId);
   if (!link) {
     notFound();
   }

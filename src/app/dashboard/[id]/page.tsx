@@ -72,15 +72,15 @@ export default async function LinkDetailPage({
   // outcome. getSession()/getOwnedLink are both cache()-wrapped, so these
   // re-checks are dedup, not second real queries.
   const session = await getSession();
-  const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!organizationId) {
     redirect("/login?callbackUrl=/dashboard");
   }
 
   const { id } = await params;
   const days = parseRangeDays((await searchParams).range);
 
-  const link = await getOwnedLink(id, userId);
+  const link = await getOwnedLink(id, organizationId);
   if (!link) {
     notFound();
   }

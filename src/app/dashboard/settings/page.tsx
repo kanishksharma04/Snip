@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { ApiKeyManager } from "@/components/features/api-key-manager";
 import { DomainManager } from "@/components/features/domain-manager";
+import { MemberManager } from "@/components/features/member-manager";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default async function SettingsPage() {
@@ -14,20 +15,39 @@ export default async function SettingsPage() {
   // cache()-wrapped, so this re-check is a dedup, not a second real query.
   const session = await getSession();
   const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!userId || !organizationId) {
     redirect("/login?callbackUrl=/dashboard/settings");
   }
 
-  const [apiKeys, domains] = await Promise.all([
+  const [apiKeys, domains, organization, members, invites] = await Promise.all([
     db.apiKey.findMany({
-      where: { userId },
+      where: { organizationId },
       orderBy: { createdAt: "desc" },
       select: { id: true, name: true, keyPrefix: true, createdAt: true, lastUsedAt: true, revokedAt: true },
     }),
     db.domain.findMany({
-      where: { userId },
+      where: { organizationId },
       orderBy: { createdAt: "desc" },
       select: { id: true, hostname: true, verifyToken: true, verifiedAt: true, createdAt: true },
+    }),
+    db.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { isPersonal: true },
+    }),
+    db.organizationMember.findMany({
+      where: { organizationId },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        role: true,
+        user: { select: { id: true, name: true, email: true, image: true } },
+      },
+    }),
+    db.organizationInvite.findMany({
+      where: { organizationId, acceptedAt: null },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, role: true, token: true, expiresAt: true },
     }),
   ]);
 
@@ -40,6 +60,7 @@ export default async function SettingsPage() {
         <TabsList>
           <TabsTrigger value="api-keys">API keys</TabsTrigger>
           <TabsTrigger value="domains">Domains</TabsTrigger>
+          <TabsTrigger value="members">Members</TabsTrigger>
         </TabsList>
         <TabsContent value="api-keys" className="flex flex-col gap-4">
           <p className="text-muted-foreground text-sm">
@@ -54,6 +75,19 @@ export default async function SettingsPage() {
             separately for it to actually route traffic here.
           </p>
           <DomainManager initialDomains={domains} />
+        </TabsContent>
+        <TabsContent value="members" className="flex flex-col gap-4">
+          <p className="text-muted-foreground text-sm">
+            Everyone here can see and manage this organization&apos;s links, domains, and API
+            keys. Only owners can invite, remove, or promote members.
+          </p>
+          <MemberManager
+            initialMembers={members}
+            initialInvites={invites}
+            viewerRole={session.user.role}
+            viewerUserId={userId}
+            isPersonal={organization.isPersonal}
+          />
         </TabsContent>
       </Tabs>
     </div>

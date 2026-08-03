@@ -34,7 +34,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // check in this app — never a distinct response that would let an API
   // caller probe which link IDs are real.
   const link = await db.link.findFirst({
-    where: { id, userId: auth.userId },
+    where: { id, organizationId: auth.organizationId },
     select: { id: true, slug: true, clickCount: true },
   });
   if (!link) {

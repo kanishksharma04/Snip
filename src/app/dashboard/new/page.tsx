@@ -5,8 +5,8 @@ import { CreateLinkForm } from "@/components/features/create-link-form";
 
 export default async function NewLinkPage() {
   const session = await getSession();
-  const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!organizationId) {
     redirect("/login?callbackUrl=/dashboard/new");
   }
 
@@ -14,7 +14,7 @@ export default async function NewLinkPage() {
   // to actually route traffic, so offering it here would just be a way to
   // create a dead link.
   const verifiedDomains = await db.domain.findMany({
-    where: { userId, verifiedAt: { not: null } },
+    where: { organizationId, verifiedAt: { not: null } },
     orderBy: { hostname: "asc" },
     select: { id: true, hostname: true },
   });

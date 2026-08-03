@@ -11,6 +11,7 @@ Built with Next.js 16, Postgres (via Prisma 7), and Redis.
 - Every click is recorded in the background — user agent, rough location, referrer, and a daily-rotating hashed IP (never the raw IP)
 - A dashboard with search, pagination, and per-link charts (clicks over time, referrers, devices, countries)
 - Downloadable QR codes for every link
+- Organizations: share links, domains, and API keys with a team instead of owning everything as one person (see [Organizations](#organizations))
 - Custom domains: attach your own domain to a link instead of the shared default (see [Custom domains](#custom-domains))
 - A public API (`/api/v1/*`) authenticated with API keys — keys are hashed in storage and shown to you in full exactly once
 - Rate limits on redirects, link creation, and the API
@@ -131,7 +132,7 @@ A note on the Redis variables: this project uses a small, free Upstash plan capp
 
 ## Public API
 
-Create a key from `/dashboard/settings` — it's shown to you in full exactly once; after that, only its hash is stored. Every request below needs that key in an `Authorization: Bearer` header, and is limited to 1,000 requests per day.
+Create a key from `/dashboard/settings` — it's shown to you in full exactly once; after that, only its hash is stored. Every request below needs that key in an `Authorization: Bearer` header, and is limited to 1,000 requests per day. A key operates on whichever organization owned it at creation time (see [Organizations](#organizations)), regardless of what its creator has active later.
 
 ```bash
 # Create a link
@@ -153,7 +154,20 @@ curl https://snip-blush.vercel.app/api/v1/links/{id}/stats \
 
 A missing, wrong, or revoked key gets a `401`. Going over the daily limit gets a `429` with a `Retry-After` header telling you when to try again. These examples were all run for real against a real generated key before being written down here.
 
-`POST /api/v1/links` also accepts an optional `domainId` — the id of one of your own verified domains (see below). Omit it, or leave it out entirely, to get a link on the default domain.
+`POST /api/v1/links` also accepts an optional `domainId` — the id of one of your organization's verified domains (see below). Omit it, or leave it out entirely, to get a link on the default domain.
+
+## Organizations
+
+Every Snip account is a member of at least one **organization** — a personal one, created automatically the moment you sign up, with you as its only member. Links, domains, and API keys all belong to an organization, not to you directly; the dashboard always shows whichever organization you currently have active, switchable from the dropdown next to the Snip logo.
+
+You can create additional organizations to share a set of links with other people:
+
+- **Inviting someone is a link, not an email.** Snip has no mail provider configured — from `/dashboard/settings` → Members, an owner generates a one-time shareable URL (`/invite/{token}`, valid for 7 days) and sends it however they like. Whoever opens it, signs in, and accepts becomes a member.
+- **Two roles**: `Owner` can invite, remove, and promote/demote members, rename the organization, and do everything a `Member` can. `Member` can create and manage links, domains, and API keys, but can't touch membership. There's always at least one owner — Snip refuses to remove or demote the last one, and refuses to let them leave.
+- **An API key is bound to the organization it was created under for its whole lifetime** — not to whichever organization its creator happens to have active later. Creating a key under Org A, then switching your active org to B, doesn't move that key or its access anywhere.
+- **Your personal organization can't be left or deleted.** It's the one guarantee that you always have somewhere to land.
+
+What's deliberately not here: organization deletion (only rename/create/invite/remove/leave), granular per-resource permissions beyond the two roles above, and per-organization URLs — which organization's data you're looking at is a session-level switch, not part of the URL.
 
 ## Custom domains
 

@@ -19,11 +19,11 @@ const PAGE_SIZE = 20;
 // anywhere in this subtree. An inline Suspense around just this page's own
 // data-dependent section gets the same loading UX without that blast radius.
 async function LinksSection({
-  userId,
+  organizationId,
   query,
   page,
 }: {
-  userId: string;
+  organizationId: string;
   query: string;
   page: number;
 }) {
@@ -32,7 +32,7 @@ async function LinksSection({
   // the row rather than aggregated over ClickEvent — that's the whole reason
   // Step 4 denormalized it onto Link, so this stays a single flat query.
   const where = {
-    userId,
+    organizationId,
     ...(query
       ? {
           OR: [
@@ -87,8 +87,8 @@ export default async function DashboardPage({
   // ever reaching the layout's redirect. getSession() is React
   // cache()-wrapped, so this re-check is a dedup, not a second real query.
   const session = await getSession();
-  const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!organizationId) {
     redirect("/login?callbackUrl=/dashboard");
   }
 
@@ -109,7 +109,7 @@ export default async function DashboardPage({
       </div>
       <SearchForm defaultValue={query} />
       <Suspense key={`${query}-${page}`} fallback={<LinksTableSkeleton />}>
-        <LinksSection userId={userId} query={query} page={page} />
+        <LinksSection organizationId={organizationId} query={query} page={page} />
       </Suspense>
     </div>
   );

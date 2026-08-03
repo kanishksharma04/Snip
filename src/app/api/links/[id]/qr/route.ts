@@ -11,14 +11,14 @@ export const runtime = "nodejs";
 // endpoint can't be used to probe which link IDs are real.
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
-  const userId = session?.user?.id;
-  if (!userId) {
+  const organizationId = session?.user?.organizationId;
+  if (!organizationId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
   const link = await db.link.findFirst({
-    where: { id, userId },
+    where: { id, organizationId },
     select: { slug: true, domain: { select: { hostname: true } } },
   });
   if (!link) {

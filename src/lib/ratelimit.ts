@@ -14,7 +14,8 @@ export const anonymousLinkCreationLimit = new Ratelimit({
   prefix: "link:ratelimit:anon-create",
 });
 
-// Authenticated link creation — keyed by userId, applied in createLink().
+// Authenticated link creation — keyed by organizationId (an org-wide cap
+// shared by all its members, not a per-person one), applied in createLink().
 export const authenticatedLinkCreationLimit = new Ratelimit({
   redis,
   limiter: Ratelimit.slidingWindow(100, "1 h"),

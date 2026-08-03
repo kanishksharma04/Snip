@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOut } from "@/lib/auth";
 import { getSession } from "@/lib/session";
+import { getUserOrganizations } from "@/lib/organizations";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { OrgSwitcher } from "@/components/features/org-switcher";
 
 export default async function DashboardLayout({
   children,
@@ -34,6 +36,13 @@ export default async function DashboardLayout({
   const user = session.user;
   const initials = user.name?.trim().charAt(0)?.toUpperCase() || "?";
 
+  const memberships = await getUserOrganizations(user.id);
+  const organizations = memberships.map((m) => ({
+    id: m.organization.id,
+    name: m.organization.name,
+    isPersonal: m.organization.isPersonal,
+  }));
+
   async function signOutAction() {
     "use server";
     await signOut({ redirectTo: "/login" });
@@ -42,12 +51,17 @@ export default async function DashboardLayout({
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <header className="bg-background/80 sticky top-0 z-10 flex items-center justify-between border-b px-6 py-4 backdrop-blur-md">
-        <Link
-          href="/dashboard"
-          className="text-lg font-semibold tracking-tight transition-opacity hover:opacity-70"
-        >
-          Snip
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard"
+            className="text-lg font-semibold tracking-tight transition-opacity hover:opacity-70"
+          >
+            Snip
+          </Link>
+          {organizations.length > 0 && user.organizationId && (
+            <OrgSwitcher organizations={organizations} activeOrganizationId={user.organizationId} />
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <DropdownMenu>
@@ -66,7 +80,7 @@ export default async function DashboardLayout({
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
-                <Link href="/dashboard/settings">API keys</Link>
+                <Link href="/dashboard/settings">Settings</Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <form action={signOutAction}>

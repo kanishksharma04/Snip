@@ -15,7 +15,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/session", () => ({
-  getSession: vi.fn(async () => ({ user: { id: "user_1" } })),
+  getSession: vi.fn(async () => ({ user: { id: "user_1", organizationId: "org_1" } })),
 }));
 
 vi.mock("next/cache", () => ({
@@ -42,7 +42,7 @@ beforeEach(() => {
   mockDomainFindFirst.mockReset();
   mockDomainFindFirst.mockResolvedValue(null);
   vi.mocked(getSession).mockResolvedValue({
-    user: { id: "user_1" },
+    user: { id: "user_1", organizationId: "org_1" },
   } as never);
 });
 

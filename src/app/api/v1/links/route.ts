@@ -76,14 +76,14 @@ async function pointsAtAVerifiedDomain(destination: string): Promise<boolean> {
 
 async function resolveDomainId(
   domainId: unknown,
-  userId: string,
+  organizationId: string,
 ): Promise<{ ok: true; domainId: string | null } | { ok: false; error: string }> {
   if (domainId === undefined) return { ok: true, domainId: null };
   if (typeof domainId !== "string") {
     return { ok: false, error: "domainId must be a string" };
   }
   const domain = await db.domain.findFirst({
-    where: { id: domainId, userId, verifiedAt: { not: null } },
+    where: { id: domainId, organizationId, verifiedAt: { not: null } },
     select: { id: true },
   });
   if (!domain) {
@@ -117,7 +117,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Destination cannot point back to Snip" }, { status: 400 });
   }
 
-  const domainResult = await resolveDomainId(domainId, auth.userId);
+  const domainResult = await resolveDomainId(domainId, auth.organizationId);
   if (!domainResult.ok) {
     return NextResponse.json({ error: domainResult.error }, { status: 400 });
   }
@@ -149,7 +149,7 @@ export async function POST(request: Request) {
     try {
       const link = await db.link.create({
         data: {
-          userId: auth.userId,
+          organizationId: auth.organizationId,
           slug: slugResult.data,
           destination: destinationResult.data,
           expiresAt: expiresAtDate,
@@ -170,7 +170,7 @@ export async function POST(request: Request) {
     try {
       const link = await db.link.create({
         data: {
-          userId: auth.userId,
+          organizationId: auth.organizationId,
           slug: generateSlug(),
           destination: destinationResult.data,
           expiresAt: expiresAtDate,
@@ -199,7 +199,7 @@ export async function GET(request: Request) {
 
   const [links, total] = await Promise.all([
     db.link.findMany({
-      where: { userId: auth.userId },
+      where: { organizationId: auth.organizationId },
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * limit,
       take: limit,
@@ -214,7 +214,7 @@ export async function GET(request: Request) {
         domain: { select: { hostname: true } },
       },
     }),
-    db.link.count({ where: { userId: auth.userId } }),
+    db.link.count({ where: { organizationId: auth.organizationId } }),
   ]);
 
   return NextResponse.json({
