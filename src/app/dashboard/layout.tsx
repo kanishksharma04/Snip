@@ -3,17 +3,8 @@ import { redirect } from "next/navigation";
 import { signOut } from "@/lib/auth";
 import { getSession } from "@/lib/session";
 import { getUserOrganizations } from "@/lib/organizations";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { OrgSwitcher } from "@/components/features/org-switcher";
+import { DashboardNav } from "@/components/features/dashboard-nav";
+import { MobileNav } from "@/components/features/mobile-nav";
 
 export default async function DashboardLayout({
   children,
@@ -34,7 +25,6 @@ export default async function DashboardLayout({
     redirect("/login?callbackUrl=/dashboard");
   }
   const user = session.user;
-  const initials = user.name?.trim().charAt(0)?.toUpperCase() || "?";
 
   const memberships = await getUserOrganizations(user.id);
   const organizations = memberships.map((m) => ({
@@ -49,52 +39,38 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="flex min-h-full flex-1 flex-col">
-      <header className="bg-background/80 sticky top-0 z-10 flex items-center justify-between border-b px-6 py-4 backdrop-blur-md">
-        <div className="flex items-center gap-3">
+    <div className="flex min-h-full flex-1">
+      {/* Desktop: a persistent sidebar is the entire chrome — no separate
+          header needed, every page below already renders its own heading. */}
+      <aside className="lg:bg-sidebar lg:text-sidebar-foreground lg:border-sidebar-border hidden lg:flex lg:w-60 lg:shrink-0 lg:flex-col lg:border-r">
+        <DashboardNav
+          organizations={organizations}
+          activeOrganizationId={user.organizationId}
+          user={user}
+          onSignOut={signOutAction}
+        />
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Mobile/tablet: the sidebar collapses into this slim sticky bar
+            plus a drawer, below the lg: breakpoint where a 240px sidebar
+            would crowd out real content. */}
+        <header className="bg-background/80 sticky top-0 z-10 flex items-center gap-3 border-b px-4 py-3 backdrop-blur-md lg:hidden">
+          <MobileNav
+            organizations={organizations}
+            activeOrganizationId={user.organizationId}
+            user={user}
+            onSignOut={signOutAction}
+          />
           <Link
             href="/dashboard"
             className="text-lg font-semibold tracking-tight transition-opacity hover:opacity-70"
           >
             Snip
           </Link>
-          {organizations.length > 0 && user.organizationId && (
-            <OrgSwitcher organizations={organizations} activeOrganizationId={user.organizationId} />
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <ThemeToggle />
-          <DropdownMenu>
-            <DropdownMenuTrigger className="rounded-full ring-offset-background transition-shadow focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">
-              <Avatar className="ring-border/80 ring-1 transition-shadow hover:ring-primary/40">
-                <AvatarImage src={user.image ?? undefined} alt={user.name ?? "User"} />
-                <AvatarFallback>{initials}</AvatarFallback>
-              </Avatar>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel className="flex flex-col">
-                <span className="font-medium">{user.name}</span>
-                <span className="text-muted-foreground text-xs font-normal">
-                  {user.email}
-                </span>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <Link href="/dashboard/settings">Settings</Link>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <form action={signOutAction}>
-                <DropdownMenuItem asChild>
-                  <button type="submit" className="w-full text-left">
-                    Sign out
-                  </button>
-                </DropdownMenuItem>
-              </form>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </header>
-      <main className="flex flex-1 flex-col">{children}</main>
+        </header>
+        <main className="flex flex-1 flex-col">{children}</main>
+      </div>
     </div>
   );
 }

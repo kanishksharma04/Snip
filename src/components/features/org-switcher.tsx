@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { switchActiveOrganization, createOrganization } from "@/lib/actions/organizations";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -31,9 +32,11 @@ type OrgOption = { id: string; name: string; isPersonal: boolean };
 export function OrgSwitcher({
   organizations,
   activeOrganizationId,
+  className,
 }: {
   organizations: OrgOption[];
   activeOrganizationId: string;
+  className?: string;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -75,9 +78,16 @@ export function OrgSwitcher({
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger className="hover:bg-accent focus-visible:ring-ring/50 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium transition-colors focus-visible:ring-3 focus-visible:outline-none">
-          <span className="max-w-40 truncate">{active?.name ?? "Select organization"}</span>
-          <IconChevronDown className="text-muted-foreground size-3.5" />
+        <DropdownMenuTrigger
+          className={cn(
+            "hover:bg-accent focus-visible:ring-ring/50 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium transition-colors focus-visible:ring-3 focus-visible:outline-none",
+            className,
+          )}
+        >
+          <span className="max-w-40 flex-1 truncate text-left">
+            {active?.name ?? "Select organization"}
+          </span>
+          <IconChevronDown className="text-muted-foreground size-3.5 shrink-0" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">
           <DropdownMenuLabel>Organizations</DropdownMenuLabel>
